@@ -13,15 +13,15 @@ app.use(bodyParser.json());
 
 // Configure AWS SDK
 const s3Client = new S3Client({
-    region: process.env.AWS_REGION,
+    region: "us-east-1",
     credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        accessKeyId: "AKIAYS2NWNIKXFQZ27L4",
+        secretAccessKey: "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",
     },
 });
 
 // Define the S3 bucket name
-const bucketName = process.env.AWS_BUCKET_NAME;
+const bucketName = "juice-box-my-uploads";
 
 // Function to extract video ID from URL
 const getVideoId = (url) => {
