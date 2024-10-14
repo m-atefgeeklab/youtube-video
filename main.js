@@ -38,7 +38,7 @@ const downloadAndUpload = async (url) => {
             const s3Key = `youtubevideos/${videoId}.mp4`;
 
             // Start the download process using exec
-            const child = exec(`python3 -m yt_dlp -f best -o "${tempFilePath}" ${url}`, { shell: true });
+            const child = exec(`./yt-dlp-env/bin/python3 -m yt_dlp -f best -o "${tempFilePath}" ${url}`, { shell: true });
 
             // Handle standard error
             child.stderr.on('data', (error) => {
