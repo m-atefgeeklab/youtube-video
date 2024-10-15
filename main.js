@@ -57,7 +57,7 @@ const downloadAndUpload = async (url, retries = 3) => {
     );
     const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
     const ytDlpPath = "/usr/local/bin/yt-dlp";
-    const cookiesPath = path.join(__dirname, "new_cookies.txt");
+    const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
 
     // Ensure cookies file exists
     if (!fs.existsSync(cookiesPath)) {
@@ -65,7 +65,7 @@ const downloadAndUpload = async (url, retries = 3) => {
     }
 
     // Command to download video using yt-dlp with cookies
-    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${tempFilePath}" ${url}`;
+    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f worst* -o "${tempFilePath}" ${url}`;
 
     return new Promise((resolve, reject) => {
       const child = exec(command, { shell: true });
