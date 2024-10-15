@@ -40,6 +40,7 @@ const getVideoId = (url) => {
 const downloadAndUpload = async (url) => {
     return new Promise((resolve, reject) => {
         try {
+            console.log(`URL: ${url}`);
             const videoId = getVideoId(url);
             const tempFilePath = path.join(os.tmpdir(), `${videoId}_${new Date().getTime()}.mp4`);
             const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
