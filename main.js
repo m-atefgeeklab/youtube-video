@@ -29,16 +29,23 @@ const getVideoId = (url) => {
     return match ? match[1] : 'unknown';
 };
 
-// Function to download a YouTube video using Python's yt-dlp and upload to S3
+// Function to download a YouTube video using yt-dlp.exe and upload to S3
 const downloadAndUpload = async (url) => {
     return new Promise((resolve, reject) => {
         try {
             const videoId = getVideoId(url);
-            const tempFilePath = path.join(os.tmpdir(), `${videoId}.mp4`); // Temporary file path
-            const s3Key = `youtubevideos/${videoId}.mp4`;
+            const tempFilePath = path.join(os.tmpdir(), `${videoId}_${new Date().getTime()}.mp4`);
+            const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
 
-            // Start the download process using exec
-            const child = exec(`./yt-dlp-env/bin/python3 -m yt_dlp -f best -o "${tempFilePath}" ${url}`, { shell: true });
+            // Use yt-dlp.exe instead of the Python package
+            const ytDlpPath = path.resolve(__dirname, 'yt-dlp.exe');
+
+            console.log(`Attempting to run: ${ytDlpPath} "${url}"`);
+
+            // Start the download process using exec, with quotes around ytDlpPath
+            const child = exec(`"${ytDlpPath}" -f b -o "${tempFilePath}" ${url}`, { shell: true });
+
+            console.log(`Downloading video: ${url}`);
 
             // Handle standard error
             child.stderr.on('data', (error) => {
@@ -52,6 +59,8 @@ const downloadAndUpload = async (url) => {
                     reject(new Error('Download failed'));
                     return;
                 }
+
+                console.log(`Video downloaded to: ${tempFilePath}`);
 
                 // Upload to S3
                 try {
