@@ -65,7 +65,7 @@ const downloadAndUpload = async (url, retries = 3) => {
     }
 
     // Log available formats
-    const listFormatsCommand = `"${ytDlpPath}" -F ${url}`;
+    const listFormatsCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -F ${url}`;
     console.log(`Fetching available formats for video: ${videoId}`);
 
     // Execute format listing command
