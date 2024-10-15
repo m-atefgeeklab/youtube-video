@@ -47,7 +47,7 @@ const retry = async (fn, retries = 3) => {
   }
 };
 
-// hFunction to download a YouTube video using yt-dlp and upload to S3
+// Function to download a YouTube video using yt-dlp and upload to S3
 const downloadAndUpload = async (url, retries = 3) => {
   return retry(async () => {
     const videoId = getVideoId(url);
@@ -64,7 +64,20 @@ const downloadAndUpload = async (url, retries = 3) => {
       throw new Error(`Cookies file not found at: ${cookiesPath}`);
     }
 
-    // Command to download video using yt-dlp with cookies
+    // Log available formats
+    const listFormatsCommand = `"${ytDlpPath}" -F ${url}`;
+    console.log(`Fetching available formats for video: ${videoId}`);
+
+    // Execute format listing command
+    exec(listFormatsCommand, (err, stdout, stderr) => {
+      if (err) {
+        console.error(`Error listing formats: ${stderr}`);
+      } else {
+        console.log(`Available formats:\n${stdout}`);
+      }
+    });
+
+    // Command to download video using yt-dlp with cookies and best quality
     const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo*+bestaudio/best -o "${tempFilePath}" ${url}`;
 
     return new Promise((resolve, reject) => {
