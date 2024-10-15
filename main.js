@@ -1,7 +1,8 @@
 require("dotenv").config();
-const { exec } = require("child_process");
-const { PassThrough } = require("stream");
+const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const { exec } = require("child_process");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const express = require("express");
 const bodyParser = require("body-parser");
@@ -12,7 +13,12 @@ const app = express();
 app.use(bodyParser.json());
 app.use(cors());
 
-// AWS S3 Client configuration
+// Define the root route
+app.get("/", (req, res) => {
+  res.send("Hello World!");
+});
+
+// Configure AWS SDK
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -24,66 +30,78 @@ const s3Client = new S3Client({
 // Define the S3 bucket name
 const bucketName = process.env.AWS_BUCKET_NAME;
 
-// Function to extract video ID from YouTube URL
+// Function to extract video ID from URL
 const getVideoId = (url) => {
   const match = url.match(/v=([^&]+)/);
   return match ? match[1] : "unknown";
 };
 
-// Function to download video from YouTube and stream it directly to S3
-const downloadAndStreamToS3 = async (url) => {
-  return new Promise((resolve, reject) => {
+// Function to retry a process a few times
+const retry = async (fn, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === retries - 1) throw error;
+    }
+  }
+};
+
+// Function to download a YouTube video using yt-dlp and upload to S3
+const downloadAndUpload = async (url, retries = 3) => {
+  return retry(async () => {
     const videoId = getVideoId(url);
+    const tempFilePath = path.join(
+      os.tmpdir(),
+      `${videoId}_${new Date().getTime()}.mp4`
+    );
     const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
     const ytDlpPath = "/usr/local/bin/yt-dlp";
     const cookiesPath = path.join(__dirname, "new_cookies.txt");
 
     // Ensure cookies file exists
-    if (!require("fs").existsSync(cookiesPath)) {
-      return reject(new Error(`Cookies file not found at: ${cookiesPath}`));
+    if (!fs.existsSync(cookiesPath)) {
+      throw new Error(`Cookies file not found at: ${cookiesPath}`);
     }
 
-    // Create a PassThrough stream to handle piping data to S3
-    const passThrough = new PassThrough();
+    // Command to download video using yt-dlp with cookies
+    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`;
 
-    // Command to download video using yt-dlp and stream the output
-    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo*+bestaudio/best -o - ${url}`; // `-o -` streams to stdout
+    return new Promise((resolve, reject) => {
+      const child = exec(command, { shell: true });
 
-    const child = exec(command, { shell: true });
-
-    // Pipe the yt-dlp output (video stream) to the PassThrough stream
-    child.stdout.pipe(passThrough);
-
-    // Handle yt-dlp errors
-    child.stderr.on("data", (error) => {
-      console.error(`Error: ${error}`);
-    });
-
-    child.on("exit", (code) => {
-      if (code !== 0) {
-        return reject(new Error("Failed to download video"));
-      }
-    });
-
-    // Upload the video stream to S3
-    const uploadParams = {
-      Bucket: bucketName,
-      Key: s3Key,
-      Body: passThrough,
-      ACL: "public-read-write",
-    };
-
-    s3Client
-      .send(new PutObjectCommand(uploadParams))
-      .then(() => {
-        console.log(`Video uploaded to S3: ${s3Key}`);
-        resolve(s3Key);
-      })
-      .catch((err) => {
-        console.error("Failed to upload video to S3", err);
-        reject(err);
+      child.stderr.on("data", (error) => {
+        console.error(`Error: ${error}`);
       });
-  });
+
+      child.on("exit", async (code) => {
+        if (code !== 0) {
+          console.error("Failed to download video");
+          return reject(new Error("Download failed"));
+        }
+
+        try {
+          const uploadParams = {
+            Bucket: bucketName,
+            Key: s3Key,
+            Body: fs.createReadStream(tempFilePath),
+            ACL: "public-read-write",
+          };
+
+          await s3Client.send(new PutObjectCommand(uploadParams));
+          console.log(`Video uploaded to S3: ${s3Key}`);
+          resolve(s3Key);
+        } catch (err) {
+          console.error("Failed to upload video to S3", err);
+          reject(err);
+        } finally {
+          fs.unlink(tempFilePath, (err) => {
+            if (err) console.error("Failed to delete temp file", err);
+          });
+        }
+      });
+    });
+  }, retries);
 };
 
 // Define the API endpoint
@@ -95,7 +113,7 @@ app.post("/download-video", async (req, res) => {
   }
 
   try {
-    const s3Key = await downloadAndStreamToS3(youtubeVideoUrl);
+    const s3Key = await downloadAndUpload(youtubeVideoUrl);
     res
       .status(200)
       .json({ message: "Video successfully uploaded to S3", s3Key });
