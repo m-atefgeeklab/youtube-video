@@ -50,8 +50,10 @@ const downloadAndUpload = async (url) => {
 
             console.log(`Attempting to run: ${ytDlpPath} "${url}"`);
 
-            // Start the download process using exec, with quotes around ytDlpPath
-            const child = exec(`"${ytDlpPath}" -f b -o "${tempFilePath}" ${url}`, { shell: true });
+            const cookiesPath = '/cookies.txt';
+
+            const child = exec(`"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`, { shell: true });
+
 
             console.log(`Downloading video: ${url}`);
 
