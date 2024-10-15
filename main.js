@@ -47,21 +47,13 @@ const retry = async (fn, retries = 3) => {
   }
 };
 
-// Function to download video and audio separately and merge using ffmpeg
+// Function to download a YouTube video using yt-dlp and upload to S3
 const downloadAndUpload = async (url, retries = 3) => {
   return retry(async () => {
     const videoId = getVideoId(url);
-    const videoFilePath = path.join(
+    const tempFilePath = path.join(
       os.tmpdir(),
-      `${videoId}_video_${new Date().getTime()}.mp4`
-    );
-    const audioFilePath = path.join(
-      os.tmpdir(),
-      `${videoId}_audio_${new Date().getTime()}.mp3`
-    );
-    const mergedFilePath = path.join(
-      os.tmpdir(),
-      `${videoId}_merged_${new Date().getTime()}.mp4`
+      `${videoId}_${new Date().getTime()}.mp4`
     );
     const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
     const ytDlpPath = "/usr/local/bin/yt-dlp";
@@ -72,67 +64,43 @@ const downloadAndUpload = async (url, retries = 3) => {
       throw new Error(`Cookies file not found at: ${cookiesPath}`);
     }
 
-    // yt-dlp commands to download video and audio separately
-    const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
-    const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
-    
-    // Execute video and audio download separately
-    await new Promise((resolve, reject) => {
-      const downloadVideo = exec(videoCommand, { shell: true });
-      downloadVideo.on("exit", (code) => {
+    // Command to download video using yt-dlp with cookies
+    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f worst -o "${tempFilePath}" ${url}`;
+
+    return new Promise((resolve, reject) => {
+      const child = exec(command, { shell: true });
+
+      child.stderr.on("data", (error) => {
+        console.error(`Error: ${error}`);
+      });
+
+      child.on("exit", async (code) => {
         if (code !== 0) {
-          return reject(new Error("Video download failed"));
+          console.error("Failed to download video");
+          return reject(new Error("Download failed"));
         }
-        resolve();
+
+        try {
+          const uploadParams = {
+            Bucket: bucketName,
+            Key: s3Key,
+            Body: fs.createReadStream(tempFilePath),
+            ACL: "public-read-write",
+          };
+
+          await s3Client.send(new PutObjectCommand(uploadParams));
+          console.log(`Video uploaded to S3: ${s3Key}`);
+          resolve(s3Key);
+        } catch (err) {
+          console.error("Failed to upload video to S3", err);
+          reject(err);
+        } finally {
+          fs.unlink(tempFilePath, (err) => {
+            if (err) console.error("Failed to delete temp file", err);
+          });
+        }
       });
     });
-
-    await new Promise((resolve, reject) => {
-      const downloadAudio = exec(audioCommand, { shell: true });
-      downloadAudio.on("exit", (code) => {
-        if (code !== 0) {
-          return reject(new Error("Audio download failed"));
-        }
-        resolve();
-      });
-    });
-
-    // Check if both video and audio files exist
-    if (!fs.existsSync(videoFilePath) || !fs.existsSync(audioFilePath)) {
-      throw new Error("Downloaded video or audio file not found");
-    }
-
-    // Merge video and audio using ffmpeg
-    const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c copy "${mergedFilePath}"`;
-    
-    await new Promise((resolve, reject) => {
-      const mergeProcess = exec(mergeCommand, { shell: true });
-
-      mergeProcess.on("exit", (code) => {
-        if (code !== 0) {
-          return reject(new Error("Merging video and audio failed"));
-        }
-        resolve();
-      });
-    });
-
-    // Check if the merged file exists before upload
-    if (!fs.existsSync(mergedFilePath)) {
-      throw new Error("Merged file not found");
-    }
-
-    // Upload the merged file to S3
-    const uploadParams = {
-      Bucket: bucketName,
-      Key: s3Key,
-      Body: fs.createReadStream(mergedFilePath),
-      ACL: "public-read-write",
-    };
-
-    await s3Client.send(new PutObjectCommand(uploadParams));
-
-    console.log(`Video uploaded to S3: ${s3Key}`);
-    return s3Key;
   }, retries);
 };
 
