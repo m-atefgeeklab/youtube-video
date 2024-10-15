@@ -3,7 +3,8 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { exec } = require("child_process");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client } = require("@aws-sdk/client-s3");
+const { Upload } = require("@aws-sdk/lib-storage");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
@@ -59,12 +60,11 @@ const downloadAndUpload = async (url, retries = 3) => {
     const ytDlpPath = "/usr/local/bin/yt-dlp";
     const cookiesPath = path.join(__dirname, "new_cookies.txt");
 
-    // Ensure cookies file exists
     if (!fs.existsSync(cookiesPath)) {
       throw new Error(`Cookies file not found at: ${cookiesPath}`);
     }
 
-    // Command to download video using yt-dlp with cookies
+    // yt-dlp command with format check
     const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo*+bestaudio/best -o "${tempFilePath}" ${url}`;
 
     return new Promise((resolve, reject) => {
@@ -80,25 +80,38 @@ const downloadAndUpload = async (url, retries = 3) => {
           return reject(new Error("Download failed"));
         }
 
-        try {
-          const uploadParams = {
-            Bucket: bucketName,
-            Key: s3Key,
-            Body: fs.createReadStream(tempFilePath),
-            ACL: "public-read-write",
-          };
+        // Check if the file exists before upload
+        fs.access(tempFilePath, fs.constants.F_OK, async (err) => {
+          if (err) {
+            console.error("Temporary file does not exist:", err);
+            return reject(new Error("File not found"));
+          }
 
-          await s3Client.send(new PutObjectCommand(uploadParams));
-          console.log(`Video uploaded to S3: ${s3Key}`);
-          resolve(s3Key);
-        } catch (err) {
-          console.error("Failed to upload video to S3", err);
-          reject(err);
-        } finally {
-          fs.unlink(tempFilePath, (err) => {
-            if (err) console.error("Failed to delete temp file", err);
-          });
-        }
+          console.log("Temporary file exists, proceeding with upload.");
+
+          try {
+            const upload = new Upload({
+              client: s3Client,
+              params: {
+                Bucket: bucketName,
+                Key: s3Key,
+                Body: fs.createReadStream(tempFilePath),
+                ACL: "public-read-write",
+              },
+            });
+
+            await upload.done();
+            console.log(`Video uploaded to S3: ${s3Key}`);
+            resolve(s3Key);
+          } catch (err) {
+            console.error("Failed to upload video to S3", err);
+            reject(err);
+          } finally {
+            fs.unlink(tempFilePath, (err) => {
+              if (err) console.error("Failed to delete temp file", err);
+            });
+          }
+        });
       });
     });
   }, retries);
