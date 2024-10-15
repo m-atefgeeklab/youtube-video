@@ -36,50 +36,50 @@ const getVideoId = (url) => {
   return match ? match[1] : "unknown";
 };
 
-// Function to download a YouTube video using yt-dlp and upload to S3
-const downloadAndUpload = async (url) => {
-  return new Promise((resolve, reject) => {
+// Function to retry a process a few times
+const retry = async (fn, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
     try {
-      const videoId = getVideoId(url);
-      const tempFilePath = path.join(
-        os.tmpdir(),
-        `${videoId}_${new Date().getTime()}.mp4`
-      );
-      const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
+      return await fn();
+    } catch (error) {
+      if (i === retries - 1) throw error;
+    }
+  }
+};
 
-      // Path to yt-dlp on EC2
-      const ytDlpPath = "/usr/local/bin/yt-dlp";
+// Function to download a YouTube video using yt-dlp and upload to S3
+const downloadAndUpload = async (url, retries = 3) => {
+  return retry(async () => {
+    const videoId = getVideoId(url);
+    const tempFilePath = path.join(
+      os.tmpdir(),
+      `${videoId}_${new Date().getTime()}.mp4`
+    );
+    const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
+    const ytDlpPath = "/usr/local/bin/yt-dlp";
+    const cookiesPath = path.join(__dirname, "new_cookies.txt");
 
-      // Path to cookies.txt in the project root directory
-      const cookiesPath = path.join(__dirname, "cookies.txt");
+    // Ensure cookies file exists
+    if (!fs.existsSync(cookiesPath)) {
+      throw new Error(`Cookies file not found at: ${cookiesPath}`);
+    }
 
-      // Ensure cookies file exists
-      if (!fs.existsSync(cookiesPath)) {
-        return reject(new Error(`Cookies file not found at: ${cookiesPath}`));
-      }
+    // Command to download video using yt-dlp with cookies
+    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`;
 
-      // Command to download video using yt-dlp with cookies
-      const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`;
-
-      // Execute the yt-dlp command
+    return new Promise((resolve, reject) => {
       const child = exec(command, { shell: true });
 
-      // Handle standard error
       child.stderr.on("data", (error) => {
         console.error(`Error: ${error}`);
       });
 
-      // Handle process exit
       child.on("exit", async (code) => {
         if (code !== 0) {
           console.error("Failed to download video");
           return reject(new Error("Download failed"));
         }
 
-        // Video downloaded successfully
-        console.log(`Video downloaded to: ${tempFilePath}`);
-
-        // Upload to S3
         try {
           const uploadParams = {
             Bucket: bucketName,
@@ -95,18 +95,13 @@ const downloadAndUpload = async (url) => {
           console.error("Failed to upload video to S3", err);
           reject(err);
         } finally {
-          // Cleanup temporary file
           fs.unlink(tempFilePath, (err) => {
-            if (err) {
-              console.error("Failed to delete temp file", err);
-            }
+            if (err) console.error("Failed to delete temp file", err);
           });
         }
       });
-    } catch (error) {
-      reject(error);
-    }
-  });
+    });
+  }, retries);
 };
 
 // Define the API endpoint
