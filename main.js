@@ -65,7 +65,7 @@ const downloadAndUpload = async (url, retries = 3) => {
     }
 
     // Command to download video using yt-dlp with cookies
-    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" "${tempFilePath}" ${url}`;
+    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -o "${tempFilePath}" ${url}`;
 
     return new Promise((resolve, reject) => {
       const child = exec(command, { shell: true });
