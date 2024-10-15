@@ -51,7 +51,7 @@ const downloadAndUpload = async (url) => {
       const ytDlpPath = "/usr/local/bin/yt-dlp";
 
       // Path to cookies.txt in the project root directory
-      const cookiesPath = "/cookies.txt";
+      const cookiesPath = "/bin/cookies.txt";
 
       // Ensure cookies file exists
       if (!fs.existsSync(cookiesPath)) {
