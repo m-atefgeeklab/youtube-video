@@ -116,7 +116,7 @@ app.post("/download-video", async (req, res) => {
     const s3Key = await downloadAndUpload(youtubeVideoUrl);
     res
       .status(200)
-      .json({ message: "Video successfully uploaded to S3", s3Key });
+      .json({ message: "Video successfully uploaded to S3", videoUrl: `https://juice-box-my-uploads.s3.amazonaws.com/${s3Key}` });
   } catch (error) {
     res.status(500).json({
       error: "Failed to download and upload video",
