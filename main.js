@@ -25,9 +25,11 @@ const s3Client = new S3Client({
 // Define the S3 bucket name
 const bucketName = process.env.AWS_BUCKET_NAME;
 
-// Function to extract video ID from URL
+// Function to extract video ID from URL (Improved to handle more URL formats)
 const getVideoId = (url) => {
-  const match = url.match(/v=([^&]+)/);
+  const regex =
+    /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+  const match = url.match(regex);
   return match ? match[1] : "unknown";
 };
 
@@ -75,7 +77,7 @@ const downloadAndStreamToS3 = async (url) => {
     // Pipe the output from yt-dlp directly into the S3 stream
     child.stdout.pipe(passThrough);
 
-    // Monitor the process for completion
+    // Handle errors and completion
     return new Promise((resolve, reject) => {
       child.stderr.on("data", (error) => {
         console.error(`Error: ${error}`);
