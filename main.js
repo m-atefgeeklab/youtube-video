@@ -6,17 +6,10 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const cors = require('cors');
 
 // Initialize Express app
 const app = express();
 app.use(bodyParser.json());
-app.use(cors());
-
-// Define the root route
-app.get('/', (req, res) => {
-    res.send('Hello World!');
-});
 
 // Configure AWS SDK
 const s3Client = new S3Client({
