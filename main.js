@@ -1,12 +1,12 @@
-require('dotenv').config();
-const express = require('express');
-const bodyParser = require('body-parser');
 const { exec } = require('child_process');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const express = require('express');
+const bodyParser = require('body-parser');
 const cors = require('cors');
+require('dotenv').config();
 
 // Initialize Express app
 const app = express();
@@ -40,22 +40,20 @@ const getVideoId = (url) => {
 const downloadAndUpload = async (url) => {
     return new Promise((resolve, reject) => {
         try {
-            console.log(`URL: ${url}`);
             const videoId = getVideoId(url);
             const tempFilePath = path.join(os.tmpdir(), `${videoId}_${new Date().getTime()}.mp4`);
             const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
 
-            // Use yt-dlp.exe instead of the Python package
+            // Path to yt-dlp.exe
             const ytDlpPath = path.resolve(__dirname, 'yt-dlp.exe');
 
-            console.log(`Attempting to run: ${ytDlpPath} "${url}"`);
+            // Use a temporary cookies path
+            const cookiesPath = path.join(os.tmpdir(), 'www.youtube.com_cookies.txt');
 
-            const cookiesPath = '/cookies.txt';
+            const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`;
 
-            const child = exec(`"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`, { shell: true });
-
-
-            console.log(`Downloading video: ${url}`);
+            // Execute the yt-dlp command
+            const child = exec(command, { shell: true });
 
             // Handle standard error
             child.stderr.on('data', (error) => {
@@ -70,6 +68,7 @@ const downloadAndUpload = async (url) => {
                     return;
                 }
 
+                // Video downloaded successfully
                 console.log(`Video downloaded to: ${tempFilePath}`);
 
                 // Upload to S3
@@ -77,7 +76,7 @@ const downloadAndUpload = async (url) => {
                     const uploadParams = {
                         Bucket: bucketName,
                         Key: s3Key,
-                        Body: fs.createReadStream(tempFilePath), // Read the temp file
+                        Body: fs.createReadStream(tempFilePath),
                         ACL: 'public-read-write',
                     };
 
