@@ -1,10 +1,11 @@
+require("dotenv").config();
+const path = require("path");
 const { exec } = require("child_process");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { PassThrough } = require("stream");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-require("dotenv").config();
 
 // Initialize Express app
 const app = express();
