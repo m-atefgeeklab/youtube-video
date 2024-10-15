@@ -36,7 +36,7 @@ const getVideoId = (url) => {
   return match ? match[1] : "unknown";
 };
 
-// Function to download a YouTube video using yt-dlp.exe and upload to S3
+// Function to download a YouTube video using yt-dlp and upload to S3
 const downloadAndUpload = async (url) => {
   return new Promise((resolve, reject) => {
     try {
@@ -47,13 +47,18 @@ const downloadAndUpload = async (url) => {
       );
       const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
 
-      // Path to yt-dlp.exe
-      // const ytDlpPath = path.resolve(__dirname, 'yt-dlp.exe');
+      // Path to yt-dlp on EC2
       const ytDlpPath = "/usr/local/bin/yt-dlp";
 
-      // Use a temporary cookies path
-      const cookiesPath = path.join(__dirname, 'cookies.txt');
+      // Path to cookies.txt in the project root directory
+      const cookiesPath = "/cookies.txt";
 
+      // Ensure cookies file exists
+      if (!fs.existsSync(cookiesPath)) {
+        return reject(new Error(`Cookies file not found at: ${cookiesPath}`));
+      }
+
+      // Command to download video using yt-dlp with cookies
       const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`;
 
       // Execute the yt-dlp command
@@ -68,8 +73,7 @@ const downloadAndUpload = async (url) => {
       child.on("exit", async (code) => {
         if (code !== 0) {
           console.error("Failed to download video");
-          reject(new Error("Download failed"));
-          return;
+          return reject(new Error("Download failed"));
         }
 
         // Video downloaded successfully
@@ -119,12 +123,10 @@ app.post("/download-video", async (req, res) => {
       .status(200)
       .json({ message: "Video successfully uploaded to S3", s3Key });
   } catch (error) {
-    res
-      .status(500)
-      .json({
-        error: "Failed to download and upload video",
-        details: error.message,
-      });
+    res.status(500).json({
+      error: "Failed to download and upload video",
+      details: error.message,
+    });
   }
 });
 
