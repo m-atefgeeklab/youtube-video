@@ -80,7 +80,7 @@ const downloadAndUpload = async (url, retries = 3) => {
           return reject(new Error("Download failed"));
         }
 
-        // Check if the file exists before upload
+        // Ensure the file exists
         fs.access(tempFilePath, fs.constants.F_OK, async (err) => {
           if (err) {
             console.error("Temporary file does not exist:", err);
@@ -107,6 +107,7 @@ const downloadAndUpload = async (url, retries = 3) => {
             console.error("Failed to upload video to S3", err);
             reject(err);
           } finally {
+            // Clean up the temporary file
             fs.unlink(tempFilePath, (err) => {
               if (err) console.error("Failed to delete temp file", err);
             });
