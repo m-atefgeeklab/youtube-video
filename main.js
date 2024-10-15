@@ -52,7 +52,7 @@ const downloadAndUpload = async (url) => {
       const ytDlpPath = "/usr/local/bin/yt-dlp";
 
       // Use a temporary cookies path
-      const cookiesPath = path.join(os.tmpdir(), "www.youtube.com_cookies.txt");
+      const cookiesPath = path.resolve(__dirname, 'www.youtube.com_cookies.txt');
 
       const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f b -o "${tempFilePath}" ${url}`;
 
