@@ -67,10 +67,10 @@ const deleteTempFiles = (filePaths) => {
   });
 };
 
-// Update the downloadAndUpload function to use deleteTempFiles
+// Update the downloadAndUpload function to use the returned s3Key
 const downloadAndUpload = async (url, retries = 3) => {
   const videoId = getVideoId(url);
-
+  
   const cachedFilePath = isCached(videoId);
   if (cachedFilePath) {
     console.log(`Video ${videoId} found in cache. Skipping download.`);
@@ -107,7 +107,7 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error("Merged file not found");
       }
 
-      await uploadToS3(mergedFilePath, videoId);
+      const s3Key = await uploadToS3(mergedFilePath, videoId); // Get the s3Key here
 
       cacheFile(mergedFilePath, videoId);
 
@@ -116,7 +116,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       // Clean up temporary files after upload
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
-      return videoId;
+      return s3Key; // Return the s3Key
     } catch (error) {
       // Clean up temporary files in case of an error
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
@@ -126,7 +126,6 @@ const downloadAndUpload = async (url, retries = 3) => {
     }
   }, retries);
 };
-
 
 // Function to run shell commands with a promise
 const execPromise = (command) => {
@@ -149,8 +148,10 @@ const uploadToS3 = async (filePath, videoId) => {
     Body: fs.createReadStream(filePath),
     ACL: "public-read-write",
   };
+  
   await s3Client.send(new PutObjectCommand(uploadParams));
   console.log(`Video uploaded to S3: ${s3Key}`);
+  return s3Key; // Return the s3Key
 };
 
 // Function to cache a file
