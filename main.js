@@ -111,7 +111,7 @@ const downloadAndUpload = async (url, retries = 3) => {
 
       cacheFile(mergedFilePath, videoId);
 
-      console.log(`Video successfully uploaded to S3: ${videoId}`);
+      // console.log(`Video successfully uploaded to S3: ${videoId}`);
       
       // Clean up temporary files after upload
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
