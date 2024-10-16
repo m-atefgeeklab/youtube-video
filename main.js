@@ -176,8 +176,8 @@ app.post("/download-video", async (req, res) => {
     const s3Key = await downloadAndUpload(youtubeVideoUrl);
     res.status(200).json({
       message: "Video successfully uploaded to S3",
-      video_url: `https://${bucketName}.s3.amazonaws.com/youtubevideos/${s3Key}`
-    });    
+      video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
+    });
   } catch (error) {
     res.status(500).json({
       error: "Failed to download and upload video",
