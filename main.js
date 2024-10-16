@@ -36,20 +36,20 @@ const getVideoId = (url) => {
   return match ? match[1] : "unknown";
 };
 
-// Function to retry a process 
-const retryUntilSuccess = async (fn) => {
-  while (true) {
+// Function to retry a process a few times
+const retry = async (fn, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
     try {
       return await fn();
     } catch (error) {
-      console.error("Error occurred, retrying...", error.message);
+      if (i === retries - 1) throw error;
     }
   }
 };
 
 // Function to download video and audio separately and merge using ffmpeg
-const downloadAndUpload = async (url) => {
-  return retryUntilSuccess(async () => {
+const downloadAndUpload = async (url, retries = 3) => {
+  return retry(async () => {
     const videoId = getVideoId(url);
     const videoFilePath = path.join(
       os.tmpdir(),
@@ -133,7 +133,7 @@ const downloadAndUpload = async (url) => {
 
     console.log(`Video uploaded to S3: ${s3Key}`);
     return s3Key;
-  });
+  }, retries);
 };
 
 // Define the API endpoint
