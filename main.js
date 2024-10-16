@@ -47,60 +47,80 @@ const retry = async (fn, retries = 3) => {
   }
 };
 
-// Function to download a YouTube video using yt-dlp and upload to S3
+const executeCommand = (command) => {
+  return new Promise((resolve, reject) => {
+    const child = exec(command, { shell: true });
+    child.on("error", (err) => reject(new Error(`Error running command: ${err.message}`)));
+    child.on("exit", (code) => {
+      if (code !== 0) {
+        return reject(new Error("Command execution failed"));
+      }
+      resolve();
+    });
+  });
+};
+
+// Function to download video and audio separately and merge using ffmpeg
 const downloadAndUpload = async (url, retries = 3) => {
   return retry(async () => {
-    const videoId = getVideoId(url);
-    const tempFilePath = path.join(
-      os.tmpdir(),
-      `${videoId}_${new Date().getTime()}.mp4`
-    );
-    const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
-    const ytDlpPath = "/usr/local/bin/yt-dlp";
-    const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
+    try {
+      const videoId = getVideoId(url);
+      const videoFilePath = path.join(os.tmpdir(), `${videoId}_video_${new Date().getTime()}.mp4`);
+      const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio_${new Date().getTime()}.mp3`);
+      const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged_${new Date().getTime()}.mp4`);
+      const s3Key = `youtubevideos/${videoId}_${new Date().getTime()}.mp4`;
+      const ytDlpPath = "/usr/local/bin/yt-dlp";
+      const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
 
-    // Ensure cookies file exists
-    if (!fs.existsSync(cookiesPath)) {
-      throw new Error(`Cookies file not found at: ${cookiesPath}`);
+      if (!fs.existsSync(cookiesPath)) {
+        throw new Error(`Cookies file not found at: ${cookiesPath}`);
+      }
+
+      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
+      const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
+
+      await executeCommand(videoCommand);
+      await executeCommand(audioCommand);
+
+      if (!fs.existsSync(videoFilePath) || !fs.existsSync(audioFilePath)) {
+        throw new Error("Downloaded video or audio file not found");
+      }
+
+      const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac -strict experimental "${mergedFilePath}"`;
+      await executeCommand(mergeCommand);
+
+      if (!fs.existsSync(mergedFilePath)) {
+        throw new Error("Merged file not found");
+      }
+
+      const uploadParams = {
+        Bucket: bucketName,
+        Key: s3Key,
+        Body: fs.createReadStream(mergedFilePath),
+        ACL: "public-read-write",
+      };
+
+      await s3Client.send(new PutObjectCommand(uploadParams));
+      console.log(`Video uploaded to S3: ${s3Key}`);
+
+      // Cleanup: delete temporary files
+      const deleteTempFiles = (filePaths) => {
+        filePaths.forEach((filePath) => {
+          if (fs.existsSync(filePath)) {
+            fs.unlink(filePath, (err) => {
+              if (err) console.error(`Failed to delete temp file: ${filePath}`, err);
+            });
+          }
+        });
+      };
+
+      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+      return s3Key;
+
+    } catch (error) {
+      console.error(`Error in downloadAndUpload: ${error.message}`);
+      throw error;
     }
-
-    // Command to download video using yt-dlp with cookies
-    const command = `"${ytDlpPath}" --cookies "${cookiesPath}" -f worst -o "${tempFilePath}" ${url}`;
-
-    return new Promise((resolve, reject) => {
-      const child = exec(command, { shell: true });
-
-      child.stderr.on("data", (error) => {
-        console.error(`Error: ${error}`);
-      });
-
-      child.on("exit", async (code) => {
-        if (code !== 0) {
-          console.error("Failed to download video");
-          return reject(new Error("Download failed"));
-        }
-
-        try {
-          const uploadParams = {
-            Bucket: bucketName,
-            Key: s3Key,
-            Body: fs.createReadStream(tempFilePath),
-            ACL: "public-read-write",
-          };
-
-          await s3Client.send(new PutObjectCommand(uploadParams));
-          console.log(`Video uploaded to S3: ${s3Key}`);
-          resolve(s3Key);
-        } catch (err) {
-          console.error("Failed to upload video to S3", err);
-          reject(err);
-        } finally {
-          fs.unlink(tempFilePath, (err) => {
-            if (err) console.error("Failed to delete temp file", err);
-          });
-        }
-      });
-    });
   }, retries);
 };
 
@@ -116,7 +136,10 @@ app.post("/download-video", async (req, res) => {
     const s3Key = await downloadAndUpload(youtubeVideoUrl);
     res
       .status(200)
-      .json({ message: "Video successfully uploaded to S3", video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}` });
+      .json({
+        message: "Video successfully uploaded to S3",
+        video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
+      });
   } catch (error) {
     res.status(500).json({
       error: "Failed to download and upload video",
