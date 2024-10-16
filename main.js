@@ -73,7 +73,6 @@ const fileExists = (filePath) => fs.existsSync(filePath);
 
 // Main: Download and merge video/audio, upload to S3
 const downloadAndUpload = async (url) => {
-  const filePaths = []; // Store file paths here to clean up later
   return retry(async () => {
     const videoId = getVideoId(url);
     const timestamp = new Date().getTime();
@@ -114,28 +113,18 @@ const downloadAndUpload = async (url) => {
 
     await s3Client.send(new PutObjectCommand(uploadParams));
     logMessage(`Video uploaded to S3: ${s3Key}`);
-    filePaths.push(videoFilePath, audioFilePath, mergedFilePath);  // Keep track of temp files for cleanup
     return s3Key;
   });
 };
 
-// Clean up temporary files
-const cleanUpTempFiles = (filePaths = []) => {
-  logMessage("Cleaning up temporary files...");
-
-  // Remove each file if it exists
-  filePaths.forEach(filePath => {
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-        logMessage(`Deleted temporary file: ${filePath}`);
-      } catch (err) {
-        logMessage(`Error deleting file: ${filePath}. ${err.message}`);
-      }
+// Utility: Clean up temporary files
+const cleanUpTempFiles = (files) => {
+  files.forEach((file) => {
+    if (fileExists(file)) {
+      fs.unlinkSync(file);
+      logMessage(`Temporary file deleted: ${file}`);
     }
   });
-
-  logMessage("Cleanup complete.");
 };
 
 // Utility: Update cookies expiration date
@@ -178,20 +167,14 @@ app.post("/download-video", async (req, res) => {
 });
 
 // Graceful shutdown and cleanup
-const gracefulShutdown = (filePaths = []) => {
+const gracefulShutdown = () => {
   logMessage("Shutting down gracefully...");
-  cleanUpTempFiles(filePaths);  // Pass the file paths for cleanup
+  cleanUpTempFiles([/* Add file paths here */]);
   process.exit(0);
 };
 
-// Add file paths for cleanup when shutting down
-process.on("SIGTERM", () => {
-  gracefulShutdown(filePaths);
-});
-
-process.on("SIGINT", () => {
-  gracefulShutdown(filePaths);
-});
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
 
 // Start the server
 const port = process.env.PORT || 3000;
