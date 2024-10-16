@@ -33,16 +33,13 @@ const getVideoId = (url) => {
   return match ? match[1] : "unknown";
 };
 
-// Retry function with timeout and retries
-const retry = async (fn, retries = 3, delay = 5000) => {
+// Function to retry a process a few times
+const retry = async (fn, retries = 3) => {
   for (let i = 0; i < retries; i++) {
     try {
       return await fn();
     } catch (error) {
-      console.error(`Error attempt ${i + 1} failed: ${error.message}`);
       if (i === retries - 1) throw error;
-      // Wait for a delay before retrying
-      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 };
