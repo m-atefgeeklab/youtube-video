@@ -7,6 +7,7 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const { console } = require("inspector");
 
 const app = express();
 app.use(bodyParser.json());
@@ -83,6 +84,8 @@ const downloadAndUpload = async (url, retries = 3) => {
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
 
     try {
+      console.log(`========== Start processing of downloading video ${videoId}... ==========`);
+
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
 
@@ -115,6 +118,8 @@ const downloadAndUpload = async (url, retries = 3) => {
       
       // Clean up temporary files after upload
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+
+      console.log(`========== Finished processing of downloading video ${videoId} ==========`);
 
       return s3Key; // Return the s3Key
     } catch (error) {
