@@ -50,7 +50,14 @@ const retry = async (fn, retries = 3, delay = 5000) => {
 // Check cache before downloading
 const isCached = (videoId) => {
   const cacheFilePath = path.join(__dirname, "cache", `${videoId}.mp4`);
-  return fs.existsSync(cacheFilePath) ? cacheFilePath : null;
+  const s3KeyFilePath = path.join(__dirname, "cache", `${videoId}.json`);
+
+  if (fs.existsSync(cacheFilePath) && fs.existsSync(s3KeyFilePath)) {
+    const { s3Key } = JSON.parse(fs.readFileSync(s3KeyFilePath));
+    return { cacheFilePath, s3Key };
+  }
+
+  return null;
 };
 
 // Function to delete temporary files
@@ -71,11 +78,11 @@ const deleteTempFiles = (filePaths) => {
 // Update the downloadAndUpload function to use the returned s3Key
 const downloadAndUpload = async (url, retries = 3) => {
   const videoId = getVideoId(url);
-  
-  const cachedFilePath = isCached(videoId);
-  if (cachedFilePath) {
+
+  const cached = isCached(videoId);
+  if (cached) {
     console.log(`Video ${videoId} found in cache. Skipping download.`);
-    return uploadToS3(cachedFilePath, videoId);
+    return cached.s3Key; // Return the existing S3 key
   }
 
   return retry(async () => {
@@ -84,7 +91,9 @@ const downloadAndUpload = async (url, retries = 3) => {
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
 
     try {
-      console.log(`========== Start processing of downloading video ${videoId}... ==========`);
+      console.log(
+        `========== Start processing of downloading video ${videoId}... ==========`
+      );
 
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
@@ -110,22 +119,23 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error("Merged file not found");
       }
 
-      const s3Key = await uploadToS3(mergedFilePath, videoId); // Get the s3Key here
-
-      cacheFile(mergedFilePath, videoId);
+      const s3Key = await uploadToS3(mergedFilePath, videoId);
+      cacheFile(mergedFilePath, videoId, s3Key);
 
       // console.log(`Video successfully uploaded to S3: ${videoId}`);
-      
+
       // Clean up temporary files after upload
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
-      console.log(`========== Finished processing of downloading video ${videoId} ==========`);
+      console.log(
+        `========== Finished processing of downloading video ${videoId} ==========`
+      );
 
       return s3Key; // Return the s3Key
     } catch (error) {
       // Clean up temporary files in case of an error
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
-      
+
       console.error(`Error in downloadAndUpload: ${error.message}`);
       throw error; // Rethrow to trigger retry
     }
@@ -153,21 +163,25 @@ const uploadToS3 = async (filePath, videoId) => {
     Body: fs.createReadStream(filePath),
     ACL: "public-read-write",
   };
-  
+
   await s3Client.send(new PutObjectCommand(uploadParams));
   console.log(`Video uploaded to S3: ${s3Key}`);
   return s3Key; // Return the s3Key
 };
 
-// Function to cache a file
-const cacheFile = (filePath, videoId) => {
+// Function to cache a file along with its S3 key
+const cacheFile = (filePath, videoId, s3Key) => {
   const cacheDir = path.join(__dirname, "cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
   }
+
   const cacheFilePath = path.join(cacheDir, `${videoId}.mp4`);
+  const s3KeyFilePath = path.join(cacheDir, `${videoId}.json`); // Store S3 key
+
   fs.copyFileSync(filePath, cacheFilePath);
-  console.log(`Cached video at ${cacheFilePath}`);
+  fs.writeFileSync(s3KeyFilePath, JSON.stringify({ s3Key })); // Save S3 key
+  console.log(`Cached video at ${cacheFilePath} with S3 key ${s3Key}`);
 };
 
 // Define the API endpoint
