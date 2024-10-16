@@ -77,8 +77,11 @@ const downloadAndUpload = async (url, retries = 3) => {
 
   const cached = isCached(videoId);
   if (cached) {
-    console.log(`Video ${videoId} found in cache. Skipping download.`);
-    return cached.s3Key; // Return the existing S3 key
+    console.log(
+      `Video with S3 key: ${cached.s3Key} - Already exist in s3 bucket.`
+    );
+    console.log("========== Skipping Downloading ==========");
+    return cached.s3Key;
   }
 
   return retry(async () => {
