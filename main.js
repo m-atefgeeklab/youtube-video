@@ -7,7 +7,6 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-const { console } = require("inspector");
 
 const app = express();
 app.use(bodyParser.json());
