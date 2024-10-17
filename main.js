@@ -147,8 +147,6 @@ const downloadAndUpload = async (url, retries = 3) => {
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
 
-      await refreshYouTubeCookies();
-
       if (!fs.existsSync(cookiesPath)) {
         throw new Error(`Cookies file not found at: ${cookiesPath}`);
       }
