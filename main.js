@@ -7,16 +7,10 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-// const { refreshYouTubeCookies } = require("./updateCookies");
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
-
-// Define the root route
-app.get("/", (req, res) => {
-  res.send("Hello World!");
-});
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -31,17 +25,6 @@ const bucketName = process.env.AWS_BUCKET_NAME;
 const getVideoId = (url) => {
   const match = url.match(/v=([^&]+)/);
   return match ? match[1] : "unknown";
-};
-
-// Function to retry a process a few times
-const retry = async (fn, retries = 3) => {
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (i === retries - 1) throw error;
-    }
-  }
 };
 
 // Check cache before downloading
@@ -92,26 +75,9 @@ const deleteTempFiles = (filePaths) => {
   );
 };
 
-const execPromise = (command) => {
-  return new Promise((resolve, reject) => {
-    exec(command, { shell: true }, (error, stdout, stderr) => {
-      if (error) {
-        // Log the error and exit code
-        console.error(
-          `Command failed with exit code ${error.code}: ${
-            stderr || error.message
-          }`
-        );
-        return reject(new Error(stderr || error.message));
-      }
-      resolve(stdout);
-    });
-  });
-};
-
 // Function to upload to S3
-const uploadToS3 = async (filePath, videoId) => {
-  const s3Key = `youtubevideos/${videoId}_${Date.now()}.mp4`;
+const uploadToS3 = async (filePath, videoId, fileType) => {
+  const s3Key = `youtubevideos/${videoId}_${Date.now()}.${fileType}`;
   const uploadParams = {
     Bucket: bucketName,
     Key: s3Key,
@@ -120,7 +86,9 @@ const uploadToS3 = async (filePath, videoId) => {
   };
 
   await s3Client.send(new PutObjectCommand(uploadParams));
-  console.log(`Video uploaded to S3: ${s3Key}`);
+  console.log(
+    `${fileType === "mp4" ? "Video" : "Thumbnail"} uploaded to S3: ${s3Key}`
+  );
   return s3Key; // Return the s3Key
 };
 
@@ -134,85 +102,69 @@ const downloadAndUpload = async (url, retries = 3) => {
     return { s3Key: cached };
   }
 
-  return retry(async () => {
-    const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
-    const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
-    const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
-    
-    // Temporary directory for thumbnails
-    const thumbnailFilePath = path.join(os.tmpdir(), `${videoId}.jpg`);
+  const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
+  const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
+  const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
+  const thumbnailFilePath = path.join(os.tmpdir(), `${videoId}_thumbnail.jpg`);
 
-    try {
-      console.log(`========== Start downloading video ${videoId}... ==========`);
+  try {
+    console.log(`========== Start downloading video ${videoId}... ==========`);
 
-      const ytDlpPath = "/usr/local/bin/yt-dlp";
-      const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
+    const ytDlpPath = "/usr/local/bin/yt-dlp";
+    const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
 
-      if (!fs.existsSync(cookiesPath)) {
-        throw new Error(`Cookies file not found at: ${cookiesPath}`);
-      }
-
-      // Step to get video title
-      const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
-      const videoTitle = (await execPromise(getTitleCommand)).trim();
-
-      // Download best video and best audio separately using yt-dlp
-      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" --add-metadata --write-description --embed-thumbnail --write-thumbnail --convert-thumbnails jpg ${url}`;
-      const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
-
-      await execPromise(videoCommand);
-      await execPromise(audioCommand);
-
-      if (!fs.existsSync(videoFilePath) || !fs.existsSync(audioFilePath)) {
-        throw new Error("Downloaded video or audio file not found");
-      }
-
-      // Merge video and audio files using ffmpeg
-      const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac "${mergedFilePath}"`;
-      await execPromise(mergeCommand);
-
-      // Upload the merged video to S3
-      const s3Key = await uploadToS3(
-        mergedFilePath,
-        `youtubevideos/${videoId}_${Date.now()}.mp4`
-      );
-      cacheFile(videoId, s3Key);
-
-      let thumbnailS3Key = null;
-
-      // Check if the thumbnail was downloaded and exists
-      if (fs.existsSync(thumbnailFilePath)) {
-        console.log(`Uploading thumbnail from ${thumbnailFilePath}`);
-        thumbnailS3Key = await uploadToS3(
-          thumbnailFilePath,
-          `youtubevideos/${videoId}_thumbnail.${Date.now()}.jpg`
-        );
-        console.log(`Thumbnail uploaded: ${thumbnailS3Key}`);
-      } else {
-        console.log("No thumbnail found in supported formats for this video.");
-      }
-
-      // Clean up temporary files
-      await deleteTempFiles([
-        videoFilePath,
-        audioFilePath,
-        mergedFilePath,
-        thumbnailFilePath,
-      ]);
-
-      console.log(`========== Finished all processing for video ${videoId} ==========`);
-
-      return { s3Key, thumbnailS3Key, videoTitle };
-    } catch (error) {
-      await deleteTempFiles([
-        videoFilePath,
-        audioFilePath,
-        mergedFilePath,
-        thumbnailFilePath,
-      ]);
-      throw error;
+    if (!fs.existsSync(cookiesPath)) {
+      throw new Error(`Cookies file not found at: ${cookiesPath}`);
     }
-  }, retries);
+
+    const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
+    const videoTitle = (await execPromise(getTitleCommand)).trim();
+
+    // Download best video and best audio separately using yt-dlp
+    const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" --add-metadata --embed-thumbnail --write-thumbnail ${url}`;
+    const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
+
+    await execPromise(videoCommand);
+    await execPromise(audioCommand);
+
+    if (!fs.existsSync(videoFilePath) || !fs.existsSync(audioFilePath)) {
+      throw new Error("Downloaded video or audio file not found");
+    }
+
+    const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac "${mergedFilePath}"`;
+    await execPromise(mergeCommand);
+
+    const s3Key = await uploadToS3(mergedFilePath, videoId, "mp4");
+    cacheFile(videoId, s3Key);
+
+    let thumbnailS3Key = null;
+    if (fs.existsSync(thumbnailFilePath)) {
+      thumbnailS3Key = await uploadToS3(thumbnailFilePath, videoId, "jpg");
+    } else {
+      console.log("No thumbnail found in supported formats for this video.");
+    }
+
+    await deleteTempFiles([
+      videoFilePath,
+      audioFilePath,
+      mergedFilePath,
+      thumbnailFilePath,
+    ]);
+
+    console.log(
+      `========== Finished all processing for video ${videoId} ==========`
+    );
+
+    return { s3Key, thumbnailS3Key, videoTitle };
+  } catch (error) {
+    await deleteTempFiles([
+      videoFilePath,
+      audioFilePath,
+      mergedFilePath,
+      thumbnailFilePath,
+    ]);
+    throw error;
+  }
 };
 
 // Define the API endpoint
@@ -224,9 +176,7 @@ app.post("/download-video", async (req, res) => {
   }
 
   try {
-    const { s3Key, thumbnailS3Key, videoTitle } = await downloadAndUpload(
-      youtubeVideoUrl
-    );
+    const { s3Key, thumbnailS3Key, videoTitle } = await downloadAndUpload(youtubeVideoUrl);
     res.status(200).json({
       message: "Video and thumbnail successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
@@ -248,3 +198,16 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
+
+// Helper function for executing shell commands
+const execPromise = (command) => {
+  return new Promise((resolve, reject) => {
+    exec(command, { shell: true }, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Command failed: ${stderr || error.message}`);
+        return reject(new Error(stderr || error.message));
+      }
+      resolve(stdout);
+    });
+  });
+};
