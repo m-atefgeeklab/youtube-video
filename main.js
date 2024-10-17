@@ -56,17 +56,12 @@ const isCached = (videoId) => {
   return null;
 };
 
-const sanitizeTitle = (title) => {
-  return title.replace(/[<>:"\/\\|?*]+/g, '_'); // Replace invalid characters
-};
-
 const cacheFile = (videoId, s3Key, videoTitle) => {
   const cacheDir = path.join(__dirname, "cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
   }
-  const sanitizedTitle = sanitizeTitle(videoTitle);
-  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key, sanitizedTitle);
+  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key);
 };
 
 // Function to delete temporary files
@@ -178,7 +173,7 @@ const downloadAndUpload = async (url, retries = 3) => {
 
       // Upload video to S3
       const s3Key = await uploadToS3(mergedFilePath, videoId);
-      cacheFile(videoId, s3Key, videoTitle);
+      cacheFile(videoId, s3Key);
 
       // Clean up temporary files
       await deleteTempFiles([
