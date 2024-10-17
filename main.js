@@ -111,7 +111,7 @@ const execPromise = (command) => {
 
 // Function to upload to S3
 const uploadToS3 = async (filePath, videoId) => {
-  const s3Key = youtubevideos / `${videoId}_${Date.now()}.mp4`;
+  const s3Key = `youtubevideos/${videoId}_${Date.now()}.mp4`;
   const uploadParams = {
     Bucket: bucketName,
     Key: s3Key,
@@ -196,7 +196,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       }
 
       // Clean up temporary files
-      awaitdeleteTempFiles([
+      await deleteTempFiles([
         videoFilePath,
         audioFilePath,
         mergedFilePath,
