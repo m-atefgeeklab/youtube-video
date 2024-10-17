@@ -56,6 +56,11 @@ const isCached = (videoId) => {
   return null;
 };
 
+const sanitizeTitle = (title) => {
+  return title.replace(/[<>:"\/\\|?*]+/g, '_');
+};
+
+
 // Function to cache only the videoId with the S3 key
 const cacheFile = (videoId, s3Key, videoTitle) => {
   const cacheDir = path.join(__dirname, "cache");
@@ -64,7 +69,8 @@ const cacheFile = (videoId, s3Key, videoTitle) => {
   }
 
   const cacheFilePath = path.join(cacheDir, `${videoId}.cache`);
-  fs.writeFileSync(cacheFilePath, s3Key, videoTitle); // Store only the s3Key
+  const sanitizedTitle = sanitizeTitle(videoTitle);
+  fs.writeFileSync(cacheFilePath, JSON.stringify({ s3Key, title: sanitizedTitle }));
   console.log(`Cached videoId: ${videoId} with S3 key: ${s3Key}`);
 };
 
