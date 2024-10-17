@@ -70,17 +70,26 @@ const cacheFile = (videoId, s3Key) => {
 
 // Function to delete temporary files
 const deleteTempFiles = (filePaths) => {
-  filePaths.forEach((filePath) => {
-    if (fs.existsSync(filePath)) {
-      fs.unlink(filePath, (err) => {
-        if (err) {
-          console.error(`Failed to delete file ${filePath}: ${err.message}`);
+  return Promise.all(
+    filePaths.map((filePath) => {
+      return new Promise((resolve) => {
+        if (fs.existsSync(filePath)) {
+          fs.unlink(filePath, (err) => {
+            if (err) {
+              console.error(
+                `Failed to delete file ${filePath}: ${err.message}`
+              );
+            } else {
+              console.log(`Temporary file deleted: ${filePath}`);
+            }
+            resolve(); // Resolve the promise after attempting to delete
+          });
         } else {
-          console.log(`Temporary file deleted: ${filePath}`);
+          resolve(); // Resolve immediately if file doesn't exist
         }
       });
-    }
-  });
+    })
+  );
 };
 
 const execPromise = (command) => {
@@ -129,20 +138,15 @@ const downloadAndUpload = async (url, retries = 3) => {
     const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
     const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
-    const thumbnailDirPath = path.join(os.tmpdir(), `${videoId}_thumbnail`);
-
-    let thumbnailFilePath = null;
+    
+    // Temporary directory for thumbnails
+    const thumbnailFilePath = path.join(os.tmpdir(), `${videoId}.jpg`);
 
     try {
-      console.log(
-        `========== Start downloading video ${videoId}... ==========`
-      );
+      console.log(`========== Start downloading video ${videoId}... ==========`);
 
-      // const ytDlpPath = path.resolve(__dirname, 'yt-dlp.exe');
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
-
-      // await refreshYouTubeCookies();
 
       if (!fs.existsSync(cookiesPath)) {
         throw new Error(`Cookies file not found at: ${cookiesPath}`);
@@ -153,7 +157,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       const videoTitle = (await execPromise(getTitleCommand)).trim();
 
       // Download best video and best audio separately using yt-dlp
-      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" --write-thumbnail ${url}`;
+      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" --add-metadata --write-description --embed-thumbnail --write-thumbnail --convert-thumbnails jpg ${url}`;
       const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
 
       await execPromise(videoCommand);
@@ -163,9 +167,11 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error("Downloaded video or audio file not found");
       }
 
+      // Merge video and audio files using ffmpeg
       const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac "${mergedFilePath}"`;
       await execPromise(mergeCommand);
 
+      // Upload the merged video to S3
       const s3Key = await uploadToS3(
         mergedFilePath,
         `youtubevideos/${videoId}_${Date.now()}.mp4`
@@ -173,46 +179,32 @@ const downloadAndUpload = async (url, retries = 3) => {
       cacheFile(videoId, s3Key);
 
       let thumbnailS3Key = null;
-      const thumbnailFormats = ["jpg", "png", "webp"];
 
-      for (let format of thumbnailFormats) {
-        const testFilePath = path.join(
-          thumbnailDirPath,
-          `${videoId}.${format}`
-        );
-        if (fs.existsSync(testFilePath)) {
-          thumbnailFilePath = testFilePath;
-          break;
-        }
-      }
-
-      if (thumbnailFilePath) {
+      // Check if the thumbnail was downloaded and exists
+      if (fs.existsSync(thumbnailFilePath)) {
         console.log(`Uploading thumbnail from ${thumbnailFilePath}`);
         thumbnailS3Key = await uploadToS3(
           thumbnailFilePath,
-          `youtubevideos/${videoId}_thumbnail.${Date.now()}`
+          `youtubevideos/${videoId}_thumbnail.${Date.now()}.jpg`
         );
         console.log(`Thumbnail uploaded: ${thumbnailS3Key}`);
       } else {
-        console.log(
-          "No thumbnail found in supported formats (jpg, png, webp)."
-        );
+        console.log("No thumbnail found in supported formats for this video.");
       }
 
-      deleteTempFiles([
+      // Clean up temporary files
+      await deleteTempFiles([
         videoFilePath,
         audioFilePath,
         mergedFilePath,
         thumbnailFilePath,
       ]);
 
-      console.log(
-        `========== Finished all processing of downloading video ${videoId} ==========`
-      );
+      console.log(`========== Finished all processing for video ${videoId} ==========`);
 
       return { s3Key, thumbnailS3Key, videoTitle };
     } catch (error) {
-      deleteTempFiles([
+      await deleteTempFiles([
         videoFilePath,
         audioFilePath,
         mergedFilePath,
