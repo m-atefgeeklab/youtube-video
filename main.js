@@ -128,6 +128,10 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error(`Cookies file not found at: ${cookiesPath}`);
       }
 
+       // Step to get video title
+       const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
+       const videoTitle = (await execPromise(getTitleCommand)).trim();
+
       const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" --write-thumbnail ${url}`;
       const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
 
@@ -165,7 +169,7 @@ const downloadAndUpload = async (url, retries = 3) => {
 
       await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath, thumbnailFilePath]);
 
-      return { s3Key, thumbnailS3Key };
+      return { s3Key, thumbnailS3Key, videoTitle };
     } catch (error) {
       await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath, thumbnailFilePath]);
       throw error;
@@ -180,10 +184,11 @@ app.post("/download-video", async (req, res) => {
   }
 
   try {
-    const { s3Key, thumbnailS3Key } = await downloadAndUpload(youtubeVideoUrl);
+    const { s3Key, thumbnailS3Key, videoTitle } = await downloadAndUpload(youtubeVideoUrl);
     res.status(200).json({
       message: "Video and thumbnail successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
+      video_title: videoTitle,
       thumbnail_url: thumbnailS3Key
         ? `https://${bucketName}.s3.amazonaws.com/${thumbnailS3Key}`
         : null,
