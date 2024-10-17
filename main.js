@@ -56,12 +56,17 @@ const isCached = (videoId) => {
   return null;
 };
 
+const sanitizeTitle = (title) => {
+  return title.replace(/[<>:"\/\\|?*]+/g, '_'); // Replace invalid characters
+};
+
 const cacheFile = (videoId, s3Key, videoTitle) => {
   const cacheDir = path.join(__dirname, "cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
   }
-  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key, videoTitle);
+  const sanitizedTitle = sanitizeTitle(videoTitle);
+  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key, sanitizedTitle);
 };
 
 // Function to delete temporary files
