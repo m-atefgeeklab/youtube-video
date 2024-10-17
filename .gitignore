@@ -1,4 +1,7 @@
 node_modules
 .env
 file.js
-cookiesCode.js
+yt-dlp.exe
+Dockerfile
+docker-compose.yml
+updateCookies.js

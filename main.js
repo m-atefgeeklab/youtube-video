@@ -71,83 +71,20 @@ const deleteTempFiles = (filePaths) => {
   });
 };
 
-// Update the downloadAndUpload function to use the returned s3Key
-const downloadAndUpload = async (url, retries = 3) => {
-  const videoId = getVideoId(url);
-
-  const cached = isCached(videoId);
-  if (cached) {
-    console.log(
-      `Video with S3 key: ${cached.s3Key} - Already exist in s3 bucket.`
-    );
-    console.log("========== Skipping Downloading ==========");
-    return cached.s3Key;
-  }
-
-  return retry(async () => {
-    const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
-    const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
-    const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
-
-    try {
-      console.log(
-        `========== Start processing of downloading video ${videoId}... ==========`
-      );
-
-      const ytDlpPath = "/usr/local/bin/yt-dlp";
-      const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
-
-      if (!fs.existsSync(cookiesPath)) {
-        throw new Error(`Cookies file not found at: ${cookiesPath}`);
-      }
-
-      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
-      const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
-
-      await execPromise(videoCommand);
-      await execPromise(audioCommand);
-
-      if (!fs.existsSync(videoFilePath) || !fs.existsSync(audioFilePath)) {
-        throw new Error("Downloaded video or audio file not found");
-      }
-
-      const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac -strict experimental "${mergedFilePath}"`;
-      await execPromise(mergeCommand);
-
-      if (!fs.existsSync(mergedFilePath)) {
-        throw new Error("Merged file not found");
-      }
-
-      const s3Key = await uploadToS3(mergedFilePath, videoId);
-      cacheFile(mergedFilePath, videoId, s3Key);
-
-      // console.log(`Video successfully uploaded to S3: ${videoId}`);
-
-      // Clean up temporary files after upload
-      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
-
-      console.log(
-        `========== Finished processing of downloading video ${videoId} ==========`
-      );
-
-      return s3Key; // Return the s3Key
-    } catch (error) {
-      // Clean up temporary files in case of an error
-      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
-
-      console.error(`Error in downloadAndUpload: ${error.message}`);
-      throw error; // Rethrow to trigger retry
-    }
-  }, retries);
-};
-
-// Function to run shell commands with a promise
 const execPromise = (command) => {
   return new Promise((resolve, reject) => {
     exec(command, { shell: true }, (error, stdout, stderr) => {
       if (error) {
+        // Log the error and exit code
+        console.error(
+          `Command failed with exit code ${error.code}: ${
+            stderr || error.message
+          }`
+        );
         return reject(new Error(stderr || error.message));
       }
+
+      console.log(`Command succeeded with exit code 0`);
       resolve(stdout);
     });
   });
@@ -181,6 +118,75 @@ const cacheFile = (filePath, videoId, s3Key) => {
   fs.copyFileSync(filePath, cacheFilePath);
   fs.writeFileSync(s3KeyFilePath, JSON.stringify({ s3Key })); // Save S3 key
   console.log(`Cached video at ${cacheFilePath} with S3 key ${s3Key}`);
+};
+
+// Update the downloadAndUpload function to use the returned s3Key
+const downloadAndUpload = async (url, retries = 3) => {
+  const videoId = getVideoId(url);
+
+  const cached = isCached(videoId);
+  if (cached) {
+    console.log(
+      `Video with S3 key: ${cached.s3Key} - Already exist in s3 bucket.`
+    );
+    console.log("========== Skipping Downloading ==========");
+    return cached.s3Key;
+  }
+
+  return retry(async () => {
+    const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
+    const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
+    const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
+
+    try {
+      console.log(
+        `========== Start processing of downloading video ${videoId}... ==========` 
+      );
+
+      // const ytDlpPath = path.resolve(__dirname, 'yt-dlp.exe');
+      const ytDlpPath = "/usr/local/bin/yt-dlp";
+      const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
+
+      await refreshYouTubeCookies();
+
+      if (!fs.existsSync(cookiesPath)) {
+        throw new Error(`Cookies file not found at: ${cookiesPath}`);
+      }
+
+      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
+      const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
+
+      await execPromise(videoCommand);
+      await execPromise(audioCommand);
+
+      if (!fs.existsSync(videoFilePath) || !fs.existsSync(audioFilePath)) {
+        throw new Error("Downloaded video or audio file not found");
+      }
+
+      const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac -strict experimental "${mergedFilePath}"`;
+      await execPromise(mergeCommand);
+
+      if (!fs.existsSync(mergedFilePath)) {
+        throw new Error("Merged file not found");
+      }
+
+      const s3Key = await uploadToS3(mergedFilePath, videoId);
+      cacheFile(mergedFilePath, videoId, s3Key);
+
+      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+
+      console.log(
+        `========== Finished processing of downloading video ${videoId} ==========` 
+      );
+
+      return s3Key; // Return the s3Key
+    } catch (error) {
+      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+
+      console.error(`Error in downloadAndUpload: ${error.message}`);
+      throw error; // Rethrow to trigger retry
+    }
+  }, retries);
 };
 
 // Define the API endpoint

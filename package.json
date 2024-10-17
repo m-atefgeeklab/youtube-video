@@ -18,6 +18,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "progress-estimator": "^0.3.1",
+    "puppeteer": "^23.6.0",
     "yargs": "^17.7.2",
     "youtube-dl-exec": "^3.0.10",
     "ytdl-core": "^4.11.5"
