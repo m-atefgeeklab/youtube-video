@@ -45,15 +45,26 @@ const retry = async (fn, retries = 3) => {
 
 // Check cache before downloading
 const isCached = (videoId) => {
-  const cacheFilePath = path.join(__dirname, "cache", `${videoId}.mp4`);
-  const s3KeyFilePath = path.join(__dirname, "cache", `${videoId}.json`);
+  const cacheFilePath = path.join(__dirname, "cache", `${videoId}.cache`);
 
-  if (fs.existsSync(cacheFilePath) && fs.existsSync(s3KeyFilePath)) {
-    const { s3Key } = JSON.parse(fs.readFileSync(s3KeyFilePath));
-    return { cacheFilePath, s3Key };
+  if (fs.existsSync(cacheFilePath)) {
+    const cachedData = fs.readFileSync(cacheFilePath, "utf-8");
+    return cachedData ? cachedData : null;
   }
 
   return null;
+};
+
+// Function to cache only the videoId with the S3 key
+const cacheFile = (videoId, s3Key) => {
+  const cacheDir = path.join(__dirname, "cache");
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir);
+  }
+
+  const cacheFilePath = path.join(cacheDir, `${videoId}.cache`);
+  fs.writeFileSync(cacheFilePath, s3Key);  // Store only the s3Key
+  console.log(`Cached videoId: ${videoId} with S3 key: ${s3Key}`);
 };
 
 // Function to delete temporary files
@@ -83,8 +94,6 @@ const execPromise = (command) => {
         );
         return reject(new Error(stderr || error.message));
       }
-
-      console.log(`Command succeeded with exit code 0`);
       resolve(stdout);
     });
   });
@@ -105,32 +114,15 @@ const uploadToS3 = async (filePath, videoId) => {
   return s3Key; // Return the s3Key
 };
 
-// Function to cache a file along with its S3 key
-const cacheFile = (filePath, videoId, s3Key) => {
-  const cacheDir = path.join(__dirname, "cache");
-  if (!fs.existsSync(cacheDir)) {
-    fs.mkdirSync(cacheDir);
-  }
-
-  const cacheFilePath = path.join(cacheDir, `${videoId}.mp4`);
-  const s3KeyFilePath = path.join(cacheDir, `${videoId}.json`); // Store S3 key
-
-  fs.copyFileSync(filePath, cacheFilePath);
-  fs.writeFileSync(s3KeyFilePath, JSON.stringify({ s3Key })); // Save S3 key
-  console.log(`Cached video at ${cacheFilePath} with S3 key ${s3Key}`);
-};
-
-// Update the downloadAndUpload function to use the returned s3Key
+// Updated function for downloading and uploading
 const downloadAndUpload = async (url, retries = 3) => {
   const videoId = getVideoId(url);
 
   const cached = isCached(videoId);
   if (cached) {
-    console.log(
-      `Video with S3 key: ${cached.s3Key} - Already exist in s3 bucket.`
-    );
+    console.log(`Video with S3 key: ${cached} already exists in S3 bucket.`);
     console.log("========== Skipping Downloading ==========");
-    return cached.s3Key;
+    return cached;  // Return cached s3Key
   }
 
   return retry(async () => {
@@ -139,11 +131,8 @@ const downloadAndUpload = async (url, retries = 3) => {
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
 
     try {
-      console.log(
-        `========== Start processing of downloading video ${videoId}... ==========` 
-      );
+      console.log(`========== Start downloading video ${videoId}... ==========`);
 
-      // const ytDlpPath = path.resolve(__dirname, 'yt-dlp.exe');
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
 
@@ -169,20 +158,20 @@ const downloadAndUpload = async (url, retries = 3) => {
       }
 
       const s3Key = await uploadToS3(mergedFilePath, videoId);
-      cacheFile(mergedFilePath, videoId, s3Key);
+      
+      // Cache only videoId and s3Key
+      cacheFile(videoId, s3Key);
 
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
-      console.log(
-        `========== Finished processing of downloading video ${videoId} ==========` 
-      );
+      console.log(`========== Finished downloading video ${videoId} ==========`);
 
-      return s3Key; // Return the s3Key
+      return s3Key;  // Return the s3Key
     } catch (error) {
       deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
       console.error(`Error in downloadAndUpload: ${error.message}`);
-      throw error; // Rethrow to trigger retry
+      throw error;  // Rethrow to trigger retry
     }
   }, retries);
 };
