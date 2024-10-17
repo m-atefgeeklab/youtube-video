@@ -49,12 +49,12 @@ const isCached = (videoId) => {
   return null;
 };
 
-const cacheFile = (videoId, s3Key) => {
+const cacheFile = (videoId, s3Key, videoTitle) => {
   const cacheDir = path.join(__dirname, "cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
   }
-  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key);
+  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key, videoTitle);
 };
 
 // Delete temporary files
@@ -65,7 +65,9 @@ const deleteTempFiles = (filePaths) => {
         if (fs.existsSync(filePath)) {
           fs.unlink(filePath, (err) => {
             if (err) {
-              console.error(`Failed to delete file ${filePath}: ${err.message}`);
+              console.error(
+                `Failed to delete file ${filePath}: ${err.message}`
+              );
             } else {
               console.log(`Temporary file deleted: ${filePath}`);
             }
@@ -116,11 +118,11 @@ const downloadAndUpload = async (url, retries = 3) => {
     const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
     const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
-    const thumbnailFilePath = path.join(os.tmpdir(), `${videoId}_thumbnail.jpg`);
 
     try {
       console.log(
-        `========== Start downloading video ${videoId}... ==========`);
+        `========== Start downloading video ${videoId}... ==========`
+      );
 
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
@@ -146,27 +148,21 @@ const downloadAndUpload = async (url, retries = 3) => {
       const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac "${mergedFilePath}"`;
       await execPromise(mergeCommand);
 
-      const s3Key = await uploadToS3(mergedFilePath, `youtubevideos/${videoId}_${Date.now()}.mp4`);
-      cacheFile(videoId, s3Key);
+      const s3Key = await uploadToS3(
+        mergedFilePath,
+        `youtubevideos/${videoId}_${Date.now()}.mp4`
+      );
+      cacheFile(videoId, s3Key, videoTitle);
 
-      let thumbnailS3Key = null;
-
-      if (fs.existsSync(thumbnailFilePath)) {
-        console.log(`Uploading thumbnail from ${thumbnailFilePath}`);
-        thumbnailS3Key = await uploadToS3(thumbnailFilePath, `youtubevideos/${videoId}_thumbnail.${Date.now()}.jpg`);
-        console.log(`Thumbnail uploaded: ${thumbnailS3Key}`);
-      } else {
-        console.log("No thumbnail found in supported formats (jpg, png, webp).");
-      }
-
-      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath, thumbnailFilePath]);
+      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
       console.log(
-        `========== Finished all processing of downloading video ${videoId} ==========`);
+        `========== Finished all processing of downloading video ${videoId} ==========`
+      );
 
-      return { s3Key, thumbnailS3Key, videoTitle };
+      return { s3Key, videoTitle };
     } catch (error) {
-      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath, thumbnailFilePath]);
+      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
       throw error;
     }
   }, retries);
@@ -179,14 +175,11 @@ app.post("/download-video", async (req, res) => {
   }
 
   try {
-    const { s3Key, thumbnailS3Key, videoTitle } = await downloadAndUpload(youtubeVideoUrl);
+    const { s3Key, videoTitle } = await downloadAndUpload(youtubeVideoUrl);
     res.status(200).json({
       message: "Video and thumbnail successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
       video_title: videoTitle,
-      thumbnail_url: thumbnailS3Key
-        ? `https://${bucketName}.s3.amazonaws.com/${thumbnailS3Key}`
-        : null,
     });
   } catch (error) {
     res.status(500).json({
