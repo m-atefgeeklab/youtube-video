@@ -56,22 +56,12 @@ const isCached = (videoId) => {
   return null;
 };
 
-const sanitizeTitle = (title) => {
-  return title.replace(/[<>:"\/\\|?*]+/g, '_');
-};
-
-
-// Function to cache only the videoId with the S3 key
 const cacheFile = (videoId, s3Key, videoTitle) => {
   const cacheDir = path.join(__dirname, "cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
   }
-
-  const cacheFilePath = path.join(cacheDir, `${videoId}.cache`);
-  const sanitizedTitle = sanitizeTitle(videoTitle);
-  fs.writeFileSync(cacheFilePath, JSON.stringify({ s3Key, title: sanitizedTitle }));
-  console.log(`Cached videoId: ${videoId} with S3 key: ${s3Key}`);
+  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key, videoTitle);
 };
 
 // Function to delete temporary files
@@ -136,9 +126,8 @@ const downloadAndUpload = async (url, retries = 3) => {
 
   const cached = isCached(videoId);
   if (cached) {
-    console.log(`Video with S3 key: ${cached} already exists in S3 bucket.`);
-    console.log("========== Skipping Downloading ==========");
-    return cached; // Return cached s3Key
+    console.log(`Video with S3 key: ${cached} already exists.`);
+    return { s3Key: cached };
   }
 
   return retry(async () => {
