@@ -92,6 +92,19 @@ const uploadToS3 = async (filePath, videoId, fileType) => {
   return s3Key; // Return the s3Key
 };
 
+// Helper function for executing shell commands
+const execPromise = (command) => {
+  return new Promise((resolve, reject) => {
+    exec(command, { shell: true }, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Command failed: ${stderr || error.message}`);
+        return reject(new Error(stderr || error.message));
+      }
+      resolve(stdout);
+    });
+  });
+};
+
 // Updated function for downloading and uploading
 const downloadAndUpload = async (url, retries = 3) => {
   const videoId = getVideoId(url);
@@ -198,16 +211,3 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
-
-// Helper function for executing shell commands
-const execPromise = (command) => {
-  return new Promise((resolve, reject) => {
-    exec(command, { shell: true }, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Command failed: ${stderr || error.message}`);
-        return reject(new Error(stderr || error.message));
-      }
-      resolve(stdout);
-    });
-  });
-};
