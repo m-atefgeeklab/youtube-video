@@ -57,28 +57,19 @@ const cacheFile = (videoId, s3Key, videoTitle) => {
   fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key, videoTitle);
 };
 
-// Delete temporary files
+// Function to delete temporary files
 const deleteTempFiles = (filePaths) => {
-  return Promise.all(
-    filePaths.map((filePath) => {
-      return new Promise((resolve) => {
-        if (fs.existsSync(filePath)) {
-          fs.unlink(filePath, (err) => {
-            if (err) {
-              console.error(
-                `Failed to delete file ${filePath}: ${err.message}`
-              );
-            } else {
-              console.log(`Temporary file deleted: ${filePath}`);
-            }
-            resolve();
-          });
+  filePaths.forEach((filePath) => {
+    if (fs.existsSync(filePath)) {
+      fs.unlink(filePath, (err) => {
+        if (err) {
+          console.error(`Failed to delete file ${filePath}: ${err.message}`);
         } else {
-          resolve();
+          console.log(`Temporary file deleted: ${filePath}`);
         }
       });
-    })
-  );
+    }
+  });
 };
 
 const execPromise = (command) => {
@@ -154,15 +145,15 @@ const downloadAndUpload = async (url, retries = 3) => {
       );
       cacheFile(videoId, s3Key, videoTitle);
 
-      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
       console.log(
-        `========== Finished all processing of downloading video ${videoId} ==========`
+        `========== Finished downloading video ${videoId} ==========`
       );
 
       return { s3Key, videoTitle };
     } catch (error) {
-      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
       throw error;
     }
   }, retries);
