@@ -7,6 +7,7 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+// const { refreshYouTubeCookies } = require("./updateCookies");
 
 const app = express();
 app.use(bodyParser.json());
@@ -63,7 +64,7 @@ const cacheFile = (videoId, s3Key) => {
   }
 
   const cacheFilePath = path.join(cacheDir, `${videoId}.cache`);
-  fs.writeFileSync(cacheFilePath, s3Key);  // Store only the s3Key
+  fs.writeFileSync(cacheFilePath, s3Key); // Store only the s3Key
   console.log(`Cached videoId: ${videoId} with S3 key: ${s3Key}`);
 };
 
@@ -122,25 +123,40 @@ const downloadAndUpload = async (url, retries = 3) => {
   if (cached) {
     console.log(`Video with S3 key: ${cached} already exists in S3 bucket.`);
     console.log("========== Skipping Downloading ==========");
-    return cached;  // Return cached s3Key
+    return cached; // Return cached s3Key
   }
 
   return retry(async () => {
     const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
     const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
+    const thumbnailDirPath = path.join(os.tmpdir(), `${videoId}_thumbnail`);
+    const thumbnailFilePath = path.join(thumbnailDirPath, `${videoId}.jpg`); // Assuming JPG format
 
     try {
-      console.log(`========== Start downloading video ${videoId}... ==========`);
+      console.log(
+        `========== Start downloading video ${videoId}... ==========`
+      );
 
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
+
+      // await refreshYouTubeCookies();
 
       if (!fs.existsSync(cookiesPath)) {
         throw new Error(`Cookies file not found at: ${cookiesPath}`);
       }
 
-      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
+      // Create thumbnail folder if not exists
+      if (!fs.existsSync(thumbnailDirPath)) {
+        fs.mkdirSync(thumbnailDirPath);
+      }
+
+      // Step to get video title
+      const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
+      const videoTitle = (await execPromise(getTitleCommand)).trim(); // Extract the video title
+
+      const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" --write-thumbnail -o "thumbnail:${thumbnailFilePath}" ${url}`;
       const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
 
       await execPromise(videoCommand);
@@ -150,6 +166,7 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error("Downloaded video or audio file not found");
       }
 
+      // Merge video and audio
       const mergeCommand = `ffmpeg -i "${videoFilePath}" -i "${audioFilePath}" -c:v copy -c:a aac -strict experimental "${mergedFilePath}"`;
       await execPromise(mergeCommand);
 
@@ -157,21 +174,40 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error("Merged file not found");
       }
 
+      // Upload video to S3
       const s3Key = await uploadToS3(mergedFilePath, videoId);
-      
-      // Cache only videoId and s3Key
       cacheFile(videoId, s3Key);
 
-      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+      // Upload thumbnail to S3 if it exists
+      let thumbnailS3Key = null;
+      if (fs.existsSync(thumbnailFilePath)) {
+        thumbnailS3Key = await uploadToS3(thumbnailFilePath, videoId);
+      }
 
-      console.log(`========== Finished downloading video ${videoId} ==========`);
+      // Clean up temporary files
+      deleteTempFiles([
+        videoFilePath,
+        audioFilePath,
+        mergedFilePath,
+        thumbnailFilePath,
+      ]);
 
-      return s3Key;  // Return the s3Key
+      console.log(
+        `========== Finished downloading video ${videoId} ==========`
+      );
+
+      // Return S3 key for video, thumbnail and video title
+      return { s3Key, thumbnailS3Key, videoTitle };
     } catch (error) {
-      deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+      deleteTempFiles([
+        videoFilePath,
+        audioFilePath,
+        mergedFilePath,
+        thumbnailFilePath,
+      ]);
 
       console.error(`Error in downloadAndUpload: ${error.message}`);
-      throw error;  // Rethrow to trigger retry
+      throw error; // Rethrow to trigger retry
     }
   }, retries);
 };
@@ -185,10 +221,14 @@ app.post("/download-video", async (req, res) => {
   }
 
   try {
-    const s3Key = await downloadAndUpload(youtubeVideoUrl);
+    const { s3Key, thumbnailS3Key, videoTitle } = await downloadAndUpload(youtubeVideoUrl);
     res.status(200).json({
-      message: "Video successfully uploaded to S3",
+      message: "Video and thumbnail successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
+      video_title: videoTitle,
+      thumbnail_url: thumbnailS3Key
+        ? `https://${bucketName}.s3.amazonaws.com/${thumbnailS3Key}`
+        : null,
     });
   } catch (error) {
     res.status(500).json({
