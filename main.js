@@ -112,6 +112,16 @@ const getVideoDuration = async (filePath) => {
   return Math.floor(parseFloat(output.trim()) * 1000); // Duration in milliseconds
 };
 
+const retry = async (fn, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === retries - 1) throw error;
+    }
+  }
+};
+
 // Updated function for downloading, trimming, and uploading
 const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
   const videoId = getVideoId(url);
