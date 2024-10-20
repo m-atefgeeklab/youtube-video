@@ -125,8 +125,8 @@ const retry = async (fn, retries = 3) => {
 // Updated function for downloading, trimming, and uploading
 const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
   const videoId = getVideoId(url);
-
   const cached = isCached(videoId);
+
   if (cached) {
     console.log(`Video with S3 key: ${cached.s3Key} already exists.`);
     console.log(`============ Skipping download and upload... ============`);
@@ -140,9 +140,7 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
     const trimmedFilePath = path.join(os.tmpdir(), `${videoId}_trimmed.mp4`);
 
     try {
-      console.log(
-        `========== Start downloading video ${videoId}... ==========`
-      );
+      console.log(`========== Start downloading video ${videoId}... ==========`);
 
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
@@ -174,19 +172,23 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
         throw new Error("Merged file not found");
       }
 
-      // Get video duration and validate trimming times
-      const duration = await getVideoDuration(mergedFilePath);
-      if (timeFrom >= duration || timeEnd > duration || timeFrom >= timeEnd) {
-        throw new Error(
-          `Invalid trim times. The video is ${duration / 1000} seconds long.`
-        );
+      // If timeFrom and timeEnd are provided, trim the video
+      if (timeFrom !== null && timeEnd !== null) {
+        const duration = await getVideoDuration(mergedFilePath);
+        if (timeFrom >= duration || timeEnd > duration || timeFrom >= timeEnd) {
+          throw new Error(
+            `Invalid trim times. The video is ${duration / 1000} seconds long.`
+          );
+        }
+
+        // Trim the merged video
+        await trimVideo(mergedFilePath, trimmedFilePath, timeFrom, timeEnd);
+        // Use the trimmed file for uploading
+        await uploadToS3(trimmedFilePath, videoId);
+      } else {
+        // Upload the merged video if no trimming is done
+        await uploadToS3(mergedFilePath, videoId);
       }
-
-      // Trim the merged video
-      await trimVideo(mergedFilePath, trimmedFilePath, timeFrom, timeEnd);
-
-      // Upload the trimmed video to S3
-      const s3Key = await uploadToS3(trimmedFilePath, videoId);
 
       cacheFile(videoId, s3Key, videoTitle);
 
@@ -200,9 +202,7 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
 
       await cleanTmpFolder();
 
-      console.log(
-        `========== Finished downloading, trimming, and uploading video ${videoId} ==========`
-      );
+      console.log(`========== Finished downloading and uploading video ${videoId} ==========`);
 
       return { s3Key, videoTitle };
     } catch (error) {
@@ -265,26 +265,26 @@ const cleanTmpFolder = () => {
 app.post("/download-trim-video", async (req, res) => {
   const { youtubeVideoUrl, timeFrom, timeEnd } = req.body;
 
-  if (!youtubeVideoUrl || timeFrom == null || timeEnd == null) {
+  if (!youtubeVideoUrl) {
     return res
       .status(400)
-      .json({ error: "YouTube video URL, timeFrom, and timeEnd are required" });
+      .json({ error: "YouTube video URL is required" });
   }
 
   try {
     const { s3Key, videoTitle } = await downloadTrimAndUpload(
       youtubeVideoUrl,
-      timeFrom,
-      timeEnd
+      timeFrom !== undefined ? timeFrom : null,
+      timeEnd !== undefined ? timeEnd : null
     );
     res.status(200).json({
-      message: "Trimmed video successfully uploaded to S3",
+      message: "Video successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
       video_title: videoTitle,
     });
   } catch (error) {
     res.status(500).json({
-      error: "Failed to download, trim, and upload video",
+      error: "Failed to download and upload video",
       details: error.message,
     });
   }
