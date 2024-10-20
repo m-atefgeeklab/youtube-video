@@ -156,7 +156,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       ]);
 
       // Clean up the /tmp/ folder
-      await cleanTmpFolder(); // This will remove any leftover files in /tmp/
+      await cleanTmpFolder();
 
       console.log(
         `========== Finished downloading video ${videoId} ==========`
@@ -202,75 +202,75 @@ const deleteTempFiles = (filePaths) => {
   );
 };
 
-// // Function to delete files in the /tmp/ folder
-// const cleanTmpFolder = () => {
-//   return new Promise((resolve, reject) => {
-//     const command = "sudo rm -r /tmp/*"; // Command to remove all files in /tmp/
-
-//     exec(command, (error, stdout, stderr) => {
-//       if (error) {
-//         console.error(
-//           `Error deleting files in /tmp/: ${stderr || error.message}`
-//         );
-//         return reject(new Error(stderr || error.message));
-//       }
-//       console.log(`All files in /tmp/ have been successfully deleted`);
-//       resolve(stdout);
-//     });
-//   });
-// };
-
 // Function to delete files in the /tmp/ folder
 const cleanTmpFolder = () => {
-  const tmpDir = os.tmpdir();
-
   return new Promise((resolve, reject) => {
-    fs.readdir(tmpDir, (err, files) => {
-      if (err) {
-        console.error(`Error reading /tmp/ folder: ${err.message}`);
-        return reject(err);
+    const command = "sudo rm -f /tmp/*";
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error(
+          `Error deleting files in /tmp/: ${stderr || error.message}`
+        );
+        return reject(new Error(stderr || error.message));
       }
-
-      if (files.length === 0) {
-        console.log("No files found in /tmp/ folder to delete.");
-        return resolve();
-      }
-
-      // Iterate over each file and remove it
-      files.forEach((file) => {
-        const filePath = path.join(tmpDir, file);
-
-        fs.lstat(filePath, (err, stats) => {
-          if (err) {
-            console.error(`Error reading file stats for ${filePath}: ${err.message}`);
-            return;
-          }
-
-          // If the file is a directory, remove it recursively, else remove the file
-          if (stats.isDirectory()) {
-            fs.rm(filePath, { recursive: true, force: true }, (err) => {
-              if (err) {
-                console.error(`Failed to delete directory ${filePath}: ${err.message}`);
-              } else {
-                console.log(`Deleted directory: ${filePath}`);
-              }
-            });
-          } else {
-            fs.unlink(filePath, (err) => {
-              if (err) {
-                console.error(`Failed to delete file ${filePath}: ${err.message}`);
-              } else {
-                console.log(`Deleted file: ${filePath}`);
-              }
-            });
-          }
-        });
-      });
-
-      resolve();
+      console.log(`All files in /tmp/ have been successfully deleted`);
+      resolve(stdout);
     });
   });
 };
+
+// // Function to delete files in the /tmp/ folder
+// const cleanTmpFolder = () => {
+//   const tmpDir = os.tmpdir();
+
+//   return new Promise((resolve, reject) => {
+//     fs.readdir(tmpDir, (err, files) => {
+//       if (err) {
+//         console.error(`Error reading /tmp/ folder: ${err.message}`);
+//         return reject(err);
+//       }
+
+//       if (files.length === 0) {
+//         console.log("No files found in /tmp/ folder to delete.");
+//         return resolve();
+//       }
+
+//       // Iterate over each file and remove it
+//       files.forEach((file) => {
+//         const filePath = path.join(tmpDir, file);
+
+//         fs.lstat(filePath, (err, stats) => {
+//           if (err) {
+//             console.error(`Error reading file stats for ${filePath}: ${err.message}`);
+//             return;
+//           }
+
+//           // If the file is a directory, remove it recursively, else remove the file
+//           if (stats.isDirectory()) {
+//             fs.rm(filePath, { recursive: true, force: true }, (err) => {
+//               if (err) {
+//                 console.error(`Failed to delete directory ${filePath}: ${err.message}`);
+//               } else {
+//                 console.log(`Deleted directory: ${filePath}`);
+//               }
+//             });
+//           } else {
+//             fs.unlink(filePath, (err) => {
+//               if (err) {
+//                 console.error(`Failed to delete file ${filePath}: ${err.message}`);
+//               } else {
+//                 console.log(`Deleted file: ${filePath}`);
+//               }
+//             });
+//           }
+//         });
+//       });
+
+//       resolve();
+//     });
+//   });
+// };
 
 const execPromise = (command) => {
   return new Promise((resolve, reject) => {
