@@ -4,7 +4,6 @@ const path = require("path");
 const os = require("os");
 const { exec } = require("child_process");
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const youtubedl = require("youtube-dl-exec");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
@@ -46,9 +45,8 @@ const retry = async (fn, retries = 3) => {
 };
 
 const sanitizeTitle = (title) => {
-  // Basic sanitization: Remove characters like newline, tabs, or special symbols
-  return title.replace(/[^\w\s\-.,]/gi, "").trim();
-}
+  return title.replace(/[<>:"\/\\|?*]+/g, "_").trim();
+};
 
 const isCached = (videoId) => {
   const cacheFilePath = path.join(__dirname, "cache", `${videoId}.cache`);
@@ -79,16 +77,18 @@ const cacheFile = (videoId, s3Key, videoTitle) => {
 };
 
 // Function to upload to S3
-const uploadToS3 = async (filePath, key) => {
+const uploadToS3 = async (filePath, videoId) => {
+  const s3Key = `youtubevideos/${videoId}_${Date.now()}.mp4`;
   const uploadParams = {
     Bucket: bucketName,
-    Key: key,
+    Key: s3Key,
     Body: fs.createReadStream(filePath),
-    ACL: "public-read",
+    ACL: "public-read-write",
   };
+
   await s3Client.send(new PutObjectCommand(uploadParams));
-  console.log(`Uploaded to S3: ${key}`);
-  return key;
+  console.log(`Video uploaded to S3: ${s3Key}`);
+  return s3Key; // Return the s3Key
 };
 
 // Updated function for downloading and uploading
@@ -106,7 +106,6 @@ const downloadAndUpload = async (url, retries = 3) => {
     const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
     const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
-    const thumbnailPath = path.join(os.tmpdir(), `${videoId}_thumbnail.jpg`);
 
     try {
       console.log(
@@ -129,6 +128,7 @@ const downloadAndUpload = async (url, retries = 3) => {
 
       const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
       const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
+
       await execPromise(videoCommand);
       await execPromise(audioCommand);
 
@@ -144,32 +144,15 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error("Merged file not found");
       }
 
-      // Fetch thumbnail using youtube-dl-exec
-      const videoInfo = await youtubedl(url, {
-        dumpSingleJson: true,
-        cookies: cookiesPath,
-      });
-      const thumbnailUrl = videoInfo.thumbnail;
-      console.log(`Fetching thumbnail from: ${thumbnailUrl}`);
-
-      // Download the thumbnail
-      const downloadThumbnailCommand = `curl -o "${thumbnailPath}" "${thumbnailUrl}"`;
-      await execPromise(downloadThumbnailCommand);
-
-       // Upload merged video and thumbnail to S3
-       const videoS3Key = `youtubevideos/${videoId}_${Date.now()}.mp4`;
-       const thumbnailS3Key = `thumbnails/${videoId}_${Date.now()}.jpg`;
-       await uploadToS3(mergedFilePath, videoS3Key);
-       await uploadToS3(thumbnailPath, thumbnailS3Key); 
-
-      cacheFile(videoId, videoS3Key, videoTitle);
+      // Upload video to S3
+      const s3Key = await uploadToS3(mergedFilePath, videoId);
+      cacheFile(videoId, s3Key, videoTitle);
 
       // Clean up temporary files
       await deleteTempFiles([
         videoFilePath,
         audioFilePath,
         mergedFilePath,
-        thumbnailPath,
       ]);
 
       // Clean up the /tmp/ folder
@@ -180,7 +163,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       );
 
       // Return S3 key for video, thumbnail and video title
-      return { videoS3Key, thumbnailS3Key, videoTitle };
+      return { s3Key, videoTitle };
     } catch (error) {
       await deleteTempFiles([
         videoFilePath,
@@ -315,11 +298,10 @@ app.post("/download-video", async (req, res) => {
   }
 
   try {
-    const { s3Key, videoTitle, thumbnailS3Key } = await downloadAndUpload(youtubeVideoUrl);
+    const { s3Key, videoTitle } = await downloadAndUpload(youtubeVideoUrl);
     res.status(200).json({
       message: "Video and thumbnail successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
-      thumbnail_url: `https://${bucketName}.s3.amazonaws.com/${thumbnailS3Key}`,
       video_title: videoTitle,
     });
   } catch (error) {
