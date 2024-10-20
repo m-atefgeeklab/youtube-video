@@ -45,8 +45,9 @@ const retry = async (fn, retries = 3) => {
 };
 
 const sanitizeTitle = (title) => {
-  return title.replace(/[<>:"\/\\|?*]+/g, "_").trim();
-};
+  // Basic sanitization: Remove characters like newline, tabs, or special symbols
+  return title.replace(/[^\w\s\-.,]/gi, "").trim();
+}
 
 const isCached = (videoId) => {
   const cacheFilePath = path.join(__dirname, "cache", `${videoId}.cache`);
