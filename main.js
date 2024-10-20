@@ -12,6 +12,11 @@ const app = express();
 app.use(bodyParser.json());
 app.use(cors());
 
+// Define the root route
+app.get("/", (req, res) => {
+  res.send("Hello World!");
+});
+
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
