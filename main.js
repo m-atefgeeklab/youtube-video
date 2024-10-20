@@ -156,7 +156,7 @@ const downloadAndUpload = async (url, retries = 3) => {
 
   const cached = isCached(videoId);
   if (cached) {
-    console.log(`Video with S3 key: ${cached} already exists.`);
+    console.log(`Video with S3 key: ${cached.s3Key} already exists.`);
     return { s3Key: cached.s3Key, videoTitle: cached.videoTitle };
   }
 
