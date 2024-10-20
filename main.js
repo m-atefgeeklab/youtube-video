@@ -47,7 +47,7 @@ const isCached = (videoId) => {
   return null;
 };
 
-const cacheFile = (videoId, s3Key, videoTitle) => {
+const cacheFile = (videoId, s3Key, videoTitle, coverPictureKey) => {
   const cacheDir = path.join(__dirname, "cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
@@ -56,6 +56,7 @@ const cacheFile = (videoId, s3Key, videoTitle) => {
   const cacheData = {
     s3Key,
     videoTitle,
+    coverPictureKey,
   };
 
   fs.writeFileSync(
@@ -80,9 +81,10 @@ const execPromise = (command) => {
   });
 };
 
-// Upload to S3 function
-const uploadToS3 = async (filePath, videoId) => {
-  const s3Key = `youtubevideos/${videoId}_${Date.now()}.mp4`;
+// Function to upload to S3
+const uploadToS3 = async (filePath, videoId, type = "video") => {
+  const ext = type === "screenshot" ? "png" : "mp4";
+  const s3Key = `youtubevideos/${videoId}_${Date.now()}.${ext}`;
   const uploadParams = {
     Bucket: bucketName,
     Key: s3Key,
@@ -91,7 +93,7 @@ const uploadToS3 = async (filePath, videoId) => {
   };
 
   await s3Client.send(new PutObjectCommand(uploadParams));
-  console.log(`Video uploaded to S3: ${s3Key}`);
+  console.log(`${type} uploaded to S3: ${s3Key}`);
   return s3Key; // Return the s3Key
 };
 
@@ -125,6 +127,19 @@ const retry = async (fn, retries = 3) => {
   }
 };
 
+// Take screenshot function
+const takeScreenshot = async (inputFilePath, outputFilePath, timestamp) => {
+  const screenshotCommand = `ffmpeg -i "${inputFilePath}" -ss ${timestamp} -vframes 1 "${outputFilePath}"`;
+  console.log(`Taking screenshot at ${timestamp}s`);
+  await execPromise(screenshotCommand);
+
+  if (!fs.existsSync(outputFilePath)) {
+    throw new Error("Screenshot file not found");
+  }
+  console.log("Screenshot taken successfully.");
+  return outputFilePath;
+};
+
 // Updated function for downloading, trimming, and uploading
 const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
   const videoId = getVideoId(url);
@@ -133,7 +148,11 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
   if (cached) {
     console.log(`Video with S3 key: ${cached.s3Key} already exists.`);
     console.log(`============ Skipping download and upload... ============`);
-    return { s3Key: cached.s3Key, videoTitle: cached.videoTitle };
+    return {
+      s3Key: cached.s3Key,
+      videoTitle: cached.videoTitle,
+      coverPictureKey: cached.coverPictureKey,
+    };
   }
 
   return retry(async () => {
@@ -141,8 +160,13 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
     const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
     const trimmedFilePath = path.join(os.tmpdir(), `${videoId}_trimmed.mp4`);
+    const screenshotFilePath = path.join(
+      os.tmpdir(),
+      `${videoId}_screenshot.png`
+    );
 
     let s3Key = null;
+    let coverPictureKey = null;
 
     try {
       console.log(
@@ -188,16 +212,27 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
           );
         }
 
+        // Take screenshot of the trimmed video
+        const screenshotTimestamp = timeFrom + (timeEnd - timeFrom) / 2;
+        await takeScreenshot(mergedFilePath, screenshotFilePath, screenshotTimestamp);
+        coverPictureKey = await uploadToS3(screenshotFilePath, videoId, "screenshot");
+
         // Trim the merged video
         await trimVideo(mergedFilePath, trimmedFilePath, timeFrom, timeEnd);
         // Use the trimmed file for uploading
         s3Key = await uploadToS3(trimmedFilePath, videoId);
       } else {
+        // Take screenshot of the merged video in the middle
+        const duration = await getVideoDuration(mergedFilePath);
+        const screenshotTimestamp = duration / 2;
+        await takeScreenshot(mergedFilePath, screenshotFilePath, screenshotTimestamp);
+        coverPictureKey = await uploadToS3(screenshotFilePath, videoId, "screenshot");
+
         // Upload the merged video if no trimming is done
         s3Key = await uploadToS3(mergedFilePath, videoId);
       }
 
-      cacheFile(videoId, s3Key, videoTitle);
+      cacheFile(videoId, s3Key, videoTitle, coverPictureKey);
 
       // Clean up temporary files
       await deleteTempFiles([
@@ -205,6 +240,7 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
         audioFilePath,
         mergedFilePath,
         trimmedFilePath,
+        screenshotFilePath,
       ]);
 
       await cleanTmpFolder();
@@ -213,13 +249,14 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
         `========== Finished downloading and uploading video ${videoId} ==========`
       );
 
-      return { s3Key, videoTitle };
+      return { s3Key, videoTitle, coverPictureKey };
     } catch (error) {
       await deleteTempFiles([
         videoFilePath,
         audioFilePath,
         mergedFilePath,
         trimmedFilePath,
+        screenshotFilePath,
       ]);
 
       console.error(`Error in downloadTrimAndUpload: ${error.message}`);
@@ -272,22 +309,24 @@ const cleanTmpFolder = () => {
 
 // API endpoint to download, trim, and upload the video
 app.post("/download-trim-video", async (req, res) => {
-  const { youtubeVideoUrl, timeFrom, timeEnd } = req.body;
+  const { url, start_time, end_time } = req.body;
 
-  if (!youtubeVideoUrl) {
+  if (!url) {
     return res.status(400).json({ error: "YouTube video URL is required" });
   }
 
   try {
-    const { s3Key, videoTitle } = await downloadTrimAndUpload(
-      youtubeVideoUrl,
-      timeFrom !== undefined ? timeFrom : null,
-      timeEnd !== undefined ? timeEnd : null
+    const { s3Key, videoTitle, coverPictureKey } = await downloadTrimAndUpload(
+      url,
+      start_time !== undefined ? start_time : null,
+      end_time !== undefined ? end_time : null
     );
     res.status(200).json({
+      success: true,
       message: "Video successfully uploaded to S3",
-      video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
-      video_title: videoTitle,
+      trimmed_video: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
+      title: videoTitle,
+      cover_picture: `https://${bucketName}.s3.amazonaws.com/${coverPictureKey}`,
     });
   } catch (error) {
     res.status(500).json({
