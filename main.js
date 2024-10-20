@@ -44,12 +44,16 @@ const retry = async (fn, retries = 3) => {
   }
 };
 
-// Check cache before downloading
+const sanitizeTitle = (title) => {
+  // Basic sanitization: Remove characters like newline, tabs, or special symbols
+  return title.replace(/[^\w\s\-.,]/gi, "").trim();
+};
+
 const isCached = (videoId) => {
   const cacheFilePath = path.join(__dirname, "cache", `${videoId}.cache`);
 
   if (fs.existsSync(cacheFilePath)) {
-    const cachedData = fs.readFileSync(cacheFilePath, "utf-8");
+    const cachedData = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
     return cachedData ? cachedData : null;
   }
 
@@ -61,7 +65,16 @@ const cacheFile = (videoId, s3Key, videoTitle) => {
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir);
   }
-  fs.writeFileSync(path.join(cacheDir, `${videoId}.cache`), s3Key);
+
+  const cacheData = {
+    s3Key,
+    videoTitle,
+  };
+
+  fs.writeFileSync(
+    path.join(cacheDir, `${videoId}.cache`),
+    JSON.stringify(cacheData)
+  );
 };
 
 // Function to delete temporary files
@@ -126,8 +139,8 @@ const downloadAndUpload = async (url, retries = 3) => {
 
   const cached = isCached(videoId);
   if (cached) {
-    console.log(`Video with S3 key: ${cached} already exists.`);
-    return { s3Key: cached };
+    console.log(`Video with S3 key: ${cached.s3Key} already exists.`);
+    return { s3Key: cached.s3Key, videoTitle: cached.videoTitle };
   }
 
   return retry(async () => {
@@ -149,9 +162,10 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error(`Cookies file not found at: ${cookiesPath}`);
       }
 
-      // Step to get video title
+      // Get video title
       const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
-      const videoTitle = (await execPromise(getTitleCommand)).trim(); // Extract the video title
+      let videoTitle = (await execPromise(getTitleCommand)).trim();
+      videoTitle = sanitizeTitle(videoTitle); // Sanitize the video title
 
       const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
       const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
@@ -176,11 +190,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       cacheFile(videoId, s3Key);
 
       // Clean up temporary files
-      await deleteTempFiles([
-        videoFilePath,
-        audioFilePath,
-        mergedFilePath,
-      ]);
+      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
       console.log(
         `========== Finished downloading video ${videoId} ==========`
@@ -189,11 +199,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       // Return S3 key for video, thumbnail and video title
       return { s3Key, videoTitle };
     } catch (error) {
-      await deleteTempFiles([
-        videoFilePath,
-        audioFilePath,
-        mergedFilePath,
-      ]);
+      await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
 
       console.error(`Error in downloadAndUpload: ${error.message}`);
       throw error; // Rethrow to trigger retry
