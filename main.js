@@ -7,16 +7,10 @@ const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
-// const { refreshYouTubeCookies } = require("./updateCookies");
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
-
-// Define the root route
-app.get("/", (req, res) => {
-  res.send("Hello World!");
-});
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -33,21 +27,9 @@ const getVideoId = (url) => {
   return match ? match[1] : "unknown";
 };
 
-// Function to retry a process a few times
-const retry = async (fn, retries = 3) => {
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      if (i === retries - 1) throw error;
-    }
-  }
-};
-
 const sanitizeTitle = (title) => {
-  // Basic sanitization: Remove characters like newline, tabs, or special symbols
-  return title.replace(/[^\w\s\-.,]/gi, "").trim();
-}
+  return title.replace(/[<>:"\/\\|?*]+/g, "").trim();
+};
 
 const isCached = (videoId) => {
   const cacheFilePath = path.join(__dirname, "cache", `${videoId}.cache`);
@@ -77,7 +59,23 @@ const cacheFile = (videoId, s3Key, videoTitle) => {
   );
 };
 
-// Function to upload to S3
+const execPromise = (command) => {
+  return new Promise((resolve, reject) => {
+    exec(command, { shell: true }, (error, stdout, stderr) => {
+      if (error) {
+        console.error(
+          `Command failed with exit code ${error.code}: ${
+            stderr || error.message
+          }`
+        );
+        return reject(new Error(stderr || error.message));
+      }
+      resolve(stdout);
+    });
+  });
+};
+
+// Upload to S3 function
 const uploadToS3 = async (filePath, videoId) => {
   const s3Key = `youtubevideos/${videoId}_${Date.now()}.mp4`;
   const uploadParams = {
@@ -92,8 +90,23 @@ const uploadToS3 = async (filePath, videoId) => {
   return s3Key; // Return the s3Key
 };
 
-// Updated function for downloading and uploading
-const downloadAndUpload = async (url, retries = 3) => {
+// Trim video function
+const trimVideo = async (inputFilePath, outputFilePath, timeFrom, timeEnd) => {
+  const trimCommand = `ffmpeg -i "${inputFilePath}" -ss ${
+    timeFrom / 1000
+  } -to ${timeEnd / 1000} -c copy "${outputFilePath}"`;
+  console.log(`Trimming video from ${timeFrom}ms to ${timeEnd}ms`);
+  await execPromise(trimCommand);
+
+  if (!fs.existsSync(outputFilePath)) {
+    throw new Error("Trimmed file not found");
+  }
+  console.log("Trimmed video successfully.");
+  return outputFilePath;
+};
+
+// Updated function for downloading, trimming, and uploading
+const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
   const videoId = getVideoId(url);
 
   const cached = isCached(videoId);
@@ -107,6 +120,7 @@ const downloadAndUpload = async (url, retries = 3) => {
     const videoFilePath = path.join(os.tmpdir(), `${videoId}_video.mp4`);
     const audioFilePath = path.join(os.tmpdir(), `${videoId}_audio.mp3`);
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
+    const trimmedFilePath = path.join(os.tmpdir(), `${videoId}_trimmed.mp4`);
 
     try {
       console.log(
@@ -116,16 +130,14 @@ const downloadAndUpload = async (url, retries = 3) => {
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
 
-      // await refreshYouTubeCookies();
-
       if (!fs.existsSync(cookiesPath)) {
         throw new Error(`Cookies file not found at: ${cookiesPath}`);
       }
 
-       // Get video title
-       const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
-       let videoTitle = (await execPromise(getTitleCommand)).trim();
-       videoTitle = sanitizeTitle(videoTitle); // Sanitize the video title
+      // Get video title
+      const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
+      let videoTitle = (await execPromise(getTitleCommand)).trim();
+      videoTitle = sanitizeTitle(videoTitle); // Sanitize the video title
 
       const videoCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestvideo -o "${videoFilePath}" ${url}`;
       const audioCommand = `"${ytDlpPath}" --cookies "${cookiesPath}" -f bestaudio -o "${audioFilePath}" ${url}`;
@@ -145,8 +157,12 @@ const downloadAndUpload = async (url, retries = 3) => {
         throw new Error("Merged file not found");
       }
 
-      // Upload video to S3
-      const s3Key = await uploadToS3(mergedFilePath, videoId);
+      // Trim the merged video
+      await trimVideo(mergedFilePath, trimmedFilePath, timeFrom, timeEnd);
+
+      // Upload the trimmed video to S3
+      const s3Key = await uploadToS3(trimmedFilePath, videoId);
+
       cacheFile(videoId, s3Key, videoTitle);
 
       // Clean up temporary files
@@ -154,30 +170,27 @@ const downloadAndUpload = async (url, retries = 3) => {
         videoFilePath,
         audioFilePath,
         mergedFilePath,
+        trimmedFilePath,
       ]);
 
-      // Clean up the /tmp/ folder
-      await cleanTmpFolder();
-
       console.log(
-        `========== Finished downloading video ${videoId} ==========`
+        `========== Finished downloading, trimming, and uploading video ${videoId} ==========`
       );
 
-      // Return S3 key for video, thumbnail and video title
       return { s3Key, videoTitle };
     } catch (error) {
       await deleteTempFiles([
         videoFilePath,
         audioFilePath,
         mergedFilePath,
+        trimmedFilePath,
       ]);
 
-      console.error(`Error in downloadAndUpload: ${error.message}`);
+      console.error(`Error in downloadTrimAndUpload: ${error.message}`);
       throw error; // Rethrow to trigger retry
     }
   }, retries);
 };
-
 
 // Function to delete temporary files
 const deleteTempFiles = (filePaths) => {
@@ -221,93 +234,29 @@ const cleanTmpFolder = () => {
   });
 };
 
-// // Function to delete files in the /tmp/ folder
-// const cleanTmpFolder = () => {
-//   const tmpDir = os.tmpdir();
+// API endpoint to download, trim, and upload the video
+app.post("/download-trim-video", async (req, res) => {
+  const { youtubeVideoUrl, timeFrom, timeEnd } = req.body;
 
-//   return new Promise((resolve, reject) => {
-//     fs.readdir(tmpDir, (err, files) => {
-//       if (err) {
-//         console.error(`Error reading /tmp/ folder: ${err.message}`);
-//         return reject(err);
-//       }
-
-//       if (files.length === 0) {
-//         console.log("No files found in /tmp/ folder to delete.");
-//         return resolve();
-//       }
-
-//       // Iterate over each file and remove it
-//       files.forEach((file) => {
-//         const filePath = path.join(tmpDir, file);
-
-//         fs.lstat(filePath, (err, stats) => {
-//           if (err) {
-//             console.error(`Error reading file stats for ${filePath}: ${err.message}`);
-//             return;
-//           }
-
-//           // If the file is a directory, remove it recursively, else remove the file
-//           if (stats.isDirectory()) {
-//             fs.rm(filePath, { recursive: true, force: true }, (err) => {
-//               if (err) {
-//                 console.error(`Failed to delete directory ${filePath}: ${err.message}`);
-//               } else {
-//                 console.log(`Deleted directory: ${filePath}`);
-//               }
-//             });
-//           } else {
-//             fs.unlink(filePath, (err) => {
-//               if (err) {
-//                 console.error(`Failed to delete file ${filePath}: ${err.message}`);
-//               } else {
-//                 console.log(`Deleted file: ${filePath}`);
-//               }
-//             });
-//           }
-//         });
-//       });
-
-//       resolve();
-//     });
-//   });
-// };
-
-const execPromise = (command) => {
-  return new Promise((resolve, reject) => {
-    exec(command, { shell: true }, (error, stdout, stderr) => {
-      if (error) {
-        // Log the error and exit code
-        console.error(
-          `Command failed with exit code ${error.code}: ${
-            stderr || error.message
-          }`
-        );
-        return reject(new Error(stderr || error.message));
-      }
-      resolve(stdout);
-    });
-  });
-};
-
-// Define the API endpoint
-app.post("/download-video", async (req, res) => {
-  const { youtubeVideoUrl } = req.body;
-
-  if (!youtubeVideoUrl) {
-    return res.status(400).json({ error: "YouTube video URL is required" });
+  if (!youtubeVideoUrl || timeFrom == null || timeEnd == null) {
+    return res
+      .status(400)
+      .json({ error: "YouTube video URL, timeFrom, and timeEnd are required" });
   }
 
   try {
-    const { s3Key, videoTitle } = await downloadAndUpload(youtubeVideoUrl);
+    const { s3Key } = await downloadTrimAndUpload(
+      youtubeVideoUrl,
+      timeFrom,
+      timeEnd
+    );
     res.status(200).json({
-      message: "Video and thumbnail successfully uploaded to S3",
+      message: "Trimmed video successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
-      video_title: videoTitle,
     });
   } catch (error) {
     res.status(500).json({
-      error: "Failed to download and upload video",
+      error: "Failed to download, trim, and upload video",
       details: error.message,
     });
   }
