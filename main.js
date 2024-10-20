@@ -101,6 +101,22 @@ const deleteTempFiles = (filePaths) => {
   );
 };
 
+// Function to delete files in the /tmp/ folder
+const cleanTmpFolder = () => {
+  return new Promise((resolve, reject) => {
+    const command = "sudo rm -r /tmp/*"; // Command to remove all files in /tmp/
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Error deleting files in /tmp/: ${stderr || error.message}`);
+        return reject(new Error(stderr || error.message));
+      }
+      console.log(`All files in /tmp/ have been successfully deleted`);
+      resolve(stdout);
+    });
+  });
+};
+
 const execPromise = (command) => {
   return new Promise((resolve, reject) => {
     exec(command, { shell: true }, (error, stdout, stderr) => {
@@ -191,6 +207,9 @@ const downloadAndUpload = async (url, retries = 3) => {
 
       // Clean up temporary files
       await deleteTempFiles([videoFilePath, audioFilePath, mergedFilePath]);
+
+       // Clean up the /tmp/ folder
+       await cleanTmpFolder(); // This will remove any leftover files in /tmp/
 
       console.log(
         `========== Finished downloading video ${videoId} ==========`
