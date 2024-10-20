@@ -137,6 +137,8 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
     const mergedFilePath = path.join(os.tmpdir(), `${videoId}_merged.mp4`);
     const trimmedFilePath = path.join(os.tmpdir(), `${videoId}_trimmed.mp4`);
 
+    let s3Key = null;
+
     try {
       console.log(
         `========== Start downloading video ${videoId}... ==========`
@@ -184,10 +186,10 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
         // Trim the merged video
         await trimVideo(mergedFilePath, trimmedFilePath, timeFrom, timeEnd);
         // Use the trimmed file for uploading
-        await uploadToS3(trimmedFilePath, videoId);
+        s3Key = await uploadToS3(trimmedFilePath, videoId);
       } else {
         // Upload the merged video if no trimming is done
-        await uploadToS3(mergedFilePath, videoId);
+        s3Key = await uploadToS3(mergedFilePath, videoId);
       }
 
       cacheFile(videoId, s3Key, videoTitle);
