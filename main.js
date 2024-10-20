@@ -92,10 +92,8 @@ const uploadToS3 = async (filePath, videoId) => {
 
 // Trim video function
 const trimVideo = async (inputFilePath, outputFilePath, timeFrom, timeEnd) => {
-  const trimCommand = `ffmpeg -i "${inputFilePath}" -ss ${
-    timeFrom / 1000
-  } -to ${timeEnd / 1000} -c copy "${outputFilePath}"`;
-  console.log(`Trimming video from ${timeFrom}ms to ${timeEnd}ms`);
+  const trimCommand = `ffmpeg -i "${inputFilePath}" -ss ${timeFrom} -to ${timeEnd} -c copy "${outputFilePath}"`;
+  console.log(`Trimming video from ${timeFrom}s to ${timeEnd}s`);
   await execPromise(trimCommand);
 
   if (!fs.existsSync(outputFilePath)) {
@@ -109,7 +107,7 @@ const trimVideo = async (inputFilePath, outputFilePath, timeFrom, timeEnd) => {
 const getVideoDuration = async (filePath) => {
   const command = `ffprobe -v error -select_streams v:0 -show_entries format=duration -of csv=p=0 "${filePath}"`;
   const output = await execPromise(command);
-  return Math.floor(parseFloat(output.trim()) * 1000); // Duration in milliseconds
+  return Math.floor(parseFloat(output.trim())); // Duration in seconds
 };
 
 const retry = async (fn, retries = 3) => {
@@ -140,7 +138,9 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
     const trimmedFilePath = path.join(os.tmpdir(), `${videoId}_trimmed.mp4`);
 
     try {
-      console.log(`========== Start downloading video ${videoId}... ==========`);
+      console.log(
+        `========== Start downloading video ${videoId}... ==========`
+      );
 
       const ytDlpPath = "/usr/local/bin/yt-dlp";
       const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
@@ -177,7 +177,7 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
         const duration = await getVideoDuration(mergedFilePath);
         if (timeFrom >= duration || timeEnd > duration || timeFrom >= timeEnd) {
           throw new Error(
-            `Invalid trim times. The video is ${duration / 1000} seconds long.`
+            `Invalid trim times. The video is ${duration} seconds long.`
           );
         }
 
@@ -202,7 +202,9 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
 
       await cleanTmpFolder();
 
-      console.log(`========== Finished downloading and uploading video ${videoId} ==========`);
+      console.log(
+        `========== Finished downloading and uploading video ${videoId} ==========`
+      );
 
       return { s3Key, videoTitle };
     } catch (error) {
@@ -266,9 +268,7 @@ app.post("/download-trim-video", async (req, res) => {
   const { youtubeVideoUrl, timeFrom, timeEnd } = req.body;
 
   if (!youtubeVideoUrl) {
-    return res
-      .status(400)
-      .json({ error: "YouTube video URL is required" });
+    return res.status(400).json({ error: "YouTube video URL is required" });
   }
 
   try {
