@@ -173,6 +173,8 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
         trimmedFilePath,
       ]);
 
+      await cleanTmpFolder();
+
       console.log(
         `========== Finished downloading, trimming, and uploading video ${videoId} ==========`
       );
