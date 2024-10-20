@@ -76,65 +76,6 @@ const cacheFile = (videoId, s3Key, videoTitle) => {
   );
 };
 
-// Function to delete temporary files
-const deleteTempFiles = (filePaths) => {
-  return Promise.all(
-    filePaths.map((filePath) => {
-      return new Promise((resolve) => {
-        if (fs.existsSync(filePath)) {
-          fs.unlink(filePath, (err) => {
-            if (err) {
-              console.error(
-                `Failed to delete file ${filePath}: ${err.message}`
-              );
-            } else {
-              console.log(`Temporary file deleted: ${filePath}`);
-            }
-            resolve();
-          });
-        } else {
-          resolve();
-        }
-      });
-    })
-  );
-};
-
-// Function to delete files in the /tmp/ folder
-const cleanTmpFolder = () => {
-  return new Promise((resolve, reject) => {
-    const command = "sudo rm -r /tmp/*"; // Command to remove all files in /tmp/
-
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error(
-          `Error deleting files in /tmp/: ${stderr || error.message}`
-        );
-        return reject(new Error(stderr || error.message));
-      }
-      console.log(`All files in /tmp/ have been successfully deleted`);
-      resolve(stdout);
-    });
-  });
-};
-
-const execPromise = (command) => {
-  return new Promise((resolve, reject) => {
-    exec(command, { shell: true }, (error, stdout, stderr) => {
-      if (error) {
-        // Log the error and exit code
-        console.error(
-          `Command failed with exit code ${error.code}: ${
-            stderr || error.message
-          }`
-        );
-        return reject(new Error(stderr || error.message));
-      }
-      resolve(stdout);
-    });
-  });
-};
-
 // Function to upload to S3
 const uploadToS3 = async (filePath, videoId) => {
   const s3Key = `youtubevideos/${videoId}_${Date.now()}.mp4`;
@@ -234,6 +175,118 @@ const downloadAndUpload = async (url, retries = 3) => {
       throw error; // Rethrow to trigger retry
     }
   }, retries);
+};
+
+
+// Function to delete temporary files
+const deleteTempFiles = (filePaths) => {
+  return Promise.all(
+    filePaths.map((filePath) => {
+      return new Promise((resolve) => {
+        if (fs.existsSync(filePath)) {
+          fs.unlink(filePath, (err) => {
+            if (err) {
+              console.error(
+                `Failed to delete file ${filePath}: ${err.message}`
+              );
+            } else {
+              console.log(`Temporary file deleted: ${filePath}`);
+            }
+            resolve();
+          });
+        } else {
+          resolve();
+        }
+      });
+    })
+  );
+};
+
+// // Function to delete files in the /tmp/ folder
+// const cleanTmpFolder = () => {
+//   return new Promise((resolve, reject) => {
+//     const command = "sudo rm -r /tmp/*"; // Command to remove all files in /tmp/
+
+//     exec(command, (error, stdout, stderr) => {
+//       if (error) {
+//         console.error(
+//           `Error deleting files in /tmp/: ${stderr || error.message}`
+//         );
+//         return reject(new Error(stderr || error.message));
+//       }
+//       console.log(`All files in /tmp/ have been successfully deleted`);
+//       resolve(stdout);
+//     });
+//   });
+// };
+
+// Function to delete files in the /tmp/ folder
+const cleanTmpFolder = () => {
+  const tmpDir = os.tmpdir();
+
+  return new Promise((resolve, reject) => {
+    fs.readdir(tmpDir, (err, files) => {
+      if (err) {
+        console.error(`Error reading /tmp/ folder: ${err.message}`);
+        return reject(err);
+      }
+
+      if (files.length === 0) {
+        console.log("No files found in /tmp/ folder to delete.");
+        return resolve();
+      }
+
+      // Iterate over each file and remove it
+      files.forEach((file) => {
+        const filePath = path.join(tmpDir, file);
+
+        fs.lstat(filePath, (err, stats) => {
+          if (err) {
+            console.error(`Error reading file stats for ${filePath}: ${err.message}`);
+            return;
+          }
+
+          // If the file is a directory, remove it recursively, else remove the file
+          if (stats.isDirectory()) {
+            fs.rm(filePath, { recursive: true, force: true }, (err) => {
+              if (err) {
+                console.error(`Failed to delete directory ${filePath}: ${err.message}`);
+              } else {
+                console.log(`Deleted directory: ${filePath}`);
+              }
+            });
+          } else {
+            fs.unlink(filePath, (err) => {
+              if (err) {
+                console.error(`Failed to delete file ${filePath}: ${err.message}`);
+              } else {
+                console.log(`Deleted file: ${filePath}`);
+              }
+            });
+          }
+        });
+      });
+
+      resolve();
+    });
+  });
+};
+
+const execPromise = (command) => {
+  return new Promise((resolve, reject) => {
+    exec(command, { shell: true }, (error, stdout, stderr) => {
+      if (error) {
+        // Log the error and exit code
+        console.error(
+          `Command failed with exit code ${error.code}: ${
+            stderr || error.message
+          }`
+        );
+        return reject(new Error(stderr || error.message));
+      }
+      resolve(stdout);
+    });
+  });
 };
 
 // Define the API endpoint
