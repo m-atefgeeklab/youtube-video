@@ -147,6 +147,7 @@ const downloadAndUpload = async (url, retries = 3) => {
       // Fetch thumbnail using youtube-dl-exec
       const videoInfo = await youtubedl(url, {
         dumpSingleJson: true,
+        cookies: cookiesPath,
       });
       const thumbnailUrl = videoInfo.thumbnail;
       console.log(`Fetching thumbnail from: ${thumbnailUrl}`);
