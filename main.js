@@ -105,6 +105,13 @@ const trimVideo = async (inputFilePath, outputFilePath, timeFrom, timeEnd) => {
   return outputFilePath;
 };
 
+// Function to get video duration in milliseconds
+const getVideoDuration = async (filePath) => {
+  const command = `ffprobe -v error -select_streams v:0 -show_entries format=duration -of csv=p=0 "${filePath}"`;
+  const output = await execPromise(command);
+  return Math.floor(parseFloat(output.trim()) * 1000); // Duration in milliseconds
+};
+
 // Updated function for downloading, trimming, and uploading
 const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
   const videoId = getVideoId(url);
@@ -155,6 +162,14 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
 
       if (!fs.existsSync(mergedFilePath)) {
         throw new Error("Merged file not found");
+      }
+
+      // Get video duration and validate trimming times
+      const duration = await getVideoDuration(mergedFilePath);
+      if (timeFrom >= duration || timeEnd > duration || timeFrom >= timeEnd) {
+        throw new Error(
+          `Invalid trim times. The video is ${duration / 1000} seconds long.`
+        );
       }
 
       // Trim the merged video
@@ -247,7 +262,7 @@ app.post("/download-trim-video", async (req, res) => {
   }
 
   try {
-    const { s3Key } = await downloadTrimAndUpload(
+    const { s3Key, videoTitle } = await downloadTrimAndUpload(
       youtubeVideoUrl,
       timeFrom,
       timeEnd
@@ -255,6 +270,7 @@ app.post("/download-trim-video", async (req, res) => {
     res.status(200).json({
       message: "Trimmed video successfully uploaded to S3",
       video_url: `https://${bucketName}.s3.amazonaws.com/${s3Key}`,
+      video_title: videoTitle,
     });
   } catch (error) {
     res.status(500).json({
