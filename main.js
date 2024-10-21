@@ -140,6 +140,32 @@ const takeScreenshot = async (inputFilePath, outputFilePath, timestamp) => {
   return outputFilePath;
 };
 
+// Cookie data
+
+
+// Ensure the cookie file exists and is not empty
+const ensureCookiesFile = async (cookiesPath, defaultCookies) => {
+  try {
+    const data = await fs.promises.readFile(cookiesPath, 'utf8');
+    if (data.trim().length === 0) {
+      console.log('File is empty. Writing default cookie data...');
+      await fs.promises.writeFile(cookiesPath, defaultCookies, 'utf8');
+      console.log('Default cookie data written successfully.');
+    } else {
+      console.log('Cookie file is not empty. No changes made.');
+    }
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      console.log('Cookie file does not exist. Creating and writing default cookie data...');
+      await fs.promises.writeFile(cookiesPath, defaultCookies, 'utf8');
+      console.log('Default cookie data written successfully.');
+    } else {
+      console.error(`Error reading or writing cookie file: ${err}`);
+      throw err;
+    }
+  }
+};
+
 // Updated function for downloading, trimming, and uploading
 const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
   const videoId = getVideoId(url);
@@ -165,6 +191,9 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
       `${videoId}_screenshot.png`
     );
 
+    const ytDlpPath = '/usr/local/bin/yt-dlp';
+    const cookiesPath = path.join(__dirname, 'youtube_cookies.txt');
+
     let s3Key = null;
     let coverPictureKey = null;
 
@@ -173,12 +202,7 @@ const downloadTrimAndUpload = async (url, timeFrom, timeEnd, retries = 3) => {
         `========== Start downloading video ${videoId}... ==========`
       );
 
-      const ytDlpPath = "/usr/local/bin/yt-dlp";
-      const cookiesPath = path.join(__dirname, "youtube_cookies.txt");
-
-      if (!fs.existsSync(cookiesPath)) {
-        throw new Error(`Cookies file not found at: ${cookiesPath}`);
-      }
+      await ensureCookiesFile(cookiesPath, cookieData);
 
       // Get video title
       const getTitleCommand = `"${ytDlpPath}" --get-title --cookies "${cookiesPath}" ${url}`;
@@ -290,19 +314,71 @@ const deleteTempFiles = (filePaths) => {
 };
 
 // Function to delete files in the /tmp/ folder
-const cleanTmpFolder = () => {
-  return new Promise((resolve, reject) => {
-    const command = "sudo rm -f /tmp/*";
+// const cleanTmpFolder = () => {
+//   return new Promise((resolve, reject) => {
+//     const command = "sudo rm -f /tmp/*";
 
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.error(
-          `Error deleting files in /tmp/: ${stderr || error.message}`
-        );
-        return reject(new Error(stderr || error.message));
+//     exec(command, (error, stdout, stderr) => {
+//       if (error) {
+//         console.error(
+//           `Error deleting files in /tmp/: ${stderr || error.message}`
+//         );
+//         return reject(new Error(stderr || error.message));
+//       }
+//       console.log(`All files in /tmp/ have been successfully deleted`);
+//       resolve(stdout);
+//     });
+//   });
+// };
+
+// Function to delete files in the /tmp/ folder
+const cleanTmpFolder = () => {
+  const tmpDir = os.tmpdir();
+
+  return new Promise((resolve, reject) => {
+    fs.readdir(tmpDir, (err, files) => {
+      if (err) {
+        console.error(`Error reading /tmp/ folder: ${err.message}`);
+        return reject(err);
       }
-      console.log(`All files in /tmp/ have been successfully deleted`);
-      resolve(stdout);
+
+      if (files.length === 0) {
+        console.log("No files found in /tmp/ folder to delete.");
+        return resolve();
+      }
+
+      // Iterate over each file and remove it
+      files.forEach((file) => {
+        const filePath = path.join(tmpDir, file);
+
+        fs.lstat(filePath, (err, stats) => {
+          if (err) {
+            console.error(`Error reading file stats for ${filePath}: ${err.message}`);
+            return;
+          }
+
+          // If the file is a directory, remove it recursively, else remove the file
+          if (stats.isDirectory()) {
+            fs.rm(filePath, { recursive: true, force: true }, (err) => {
+              if (err) {
+                console.error(`Failed to delete directory ${filePath}: ${err.message}`);
+              } else {
+                console.log(`Deleted directory: ${filePath}`);
+              }
+            });
+          } else {
+            fs.unlink(filePath, (err) => {
+              if (err) {
+                console.error(`Failed to delete file ${filePath}: ${err.message}`);
+              } else {
+                console.log(`Deleted file: ${filePath}`);
+              }
+            });
+          }
+        });
+      });
+
+      resolve();
     });
   });
 };
